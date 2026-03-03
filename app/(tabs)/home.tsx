@@ -8,9 +8,27 @@ import { Image } from 'expo-image'
 import * as Icons from 'phosphor-react-native'
 import React from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
+import {useEffect} from "react"
+import {auth} from "@/config/firebase";
+import { trackAppOpen } from '@/services/visitTracker'
+
 
 const Home = () => {
   const { user } = useAuth()
+
+  //track app usage 
+  useEffect(() => {
+  const recordVisit = async () => {
+    if (user?.uid) {
+      await trackAppOpen({
+        uid: user.uid,
+        displayName: user.name || '',
+        email: user.email || '',
+      } as any); 
+    }
+  };
+  recordVisit();
+}, [user]);
 
   // Simplified graph data for Solar Prediction
   const solarGraphData = [
