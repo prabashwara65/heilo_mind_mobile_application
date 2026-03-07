@@ -2,14 +2,17 @@ import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY } from "@/constants/theme";
 import { useAuth } from "@/context/authContext";
+import { useFocusEffect } from "@react-navigation/native";
 import { getProfileImage } from "@/services/imageService";
 import { verticalScale } from "@/utils/styling";
 import { Image } from "expo-image";
 import * as Icons from "phosphor-react-native";
-import React, { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { trackAppOpen } from "@/services/visitTracker";
+import { trackAppOpenAWS } from "@/services/awsAppVisit";
 import { fetchSyncStatus, SyncStatus } from "@/services/syncService";
+import { publishGetDataRequest } from "@/services/awsIotPublisher";
 
 const SENSOR_API_URL =
   "https://m5isvhcq7e.execute-api.eu-north-1.amazonaws.com/sensor?deviceId=Raspberry";
@@ -27,34 +30,61 @@ const Home = () => {
     deviceCount: 0,
     status: "Inactive",
   });
+  const [awsAppVisitCount, setAwsAppVisitCount] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasVisitedDashboardOnce = useRef(false);
 
-  //track app usage
-  useEffect(() => {
-    const recordVisit = async () => {
-      if (user?.uid) {
-        await trackAppOpen({
-          uid: user.uid,
-          displayName: user.name || "",
-          email: user.email || "",
-        } as any);
-      }
-    };
-    recordVisit();
+  const recordVisit = useCallback(async () => {
+    if (!user?.uid) return;
+
+    // Track with Firebase
+    await trackAppOpen(user as any);
+
+    // Track with AWS Lambda
+    const awsData = await trackAppOpenAWS(user.uid);
+    console.log("AWS App Visit Data:", awsData);
+
+    // Optionally, you can store it in state to display on UI
+    if (awsData) {
+      setAwsAppVisitCount(awsData.dailyAppOpenCount);
+    }
   }, [user]);
 
-  const loadSyncStatus = async () => {
+  // Count visit only when user enters Home screen (not on refresh action)
+  useFocusEffect(
+    useCallback(() => {
+      recordVisit();
+    }, [recordVisit]),
+  );
+
+  useEffect(() => {
+    publishGetDataRequest("app_open");
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasVisitedDashboardOnce.current) {
+        hasVisitedDashboardOnce.current = true;
+        return;
+      }
+
+      publishGetDataRequest("dashboard_visit");
+    }, []),
+  );
+
+  const loadSyncStatus = useCallback(async () => {
     const status = await fetchSyncStatus();
     setSyncStatus(status);
-  };
+  }, []);
 
   useEffect(() => {
     loadSyncStatus();
     const interval = setInterval(loadSyncStatus, 30000);  
     return () => clearInterval(interval);
-  }, []);
+  }, [loadSyncStatus]);
 
   // Flatten nested objects
-  const flattenData = (
+  const flattenData = useCallback((
     obj: Record<string, any>,
     prefix = "",
   ): Record<string, any> => {
@@ -67,10 +97,10 @@ const Home = () => {
       }
     }
     return result;
-  };
+  }, []);
 
   //fetch sensor data
-  const fetchSensorData = async () => {
+  const fetchSensorData = useCallback(async () => {
     try {
       setSensorError(null);
       const response = await fetch(SENSOR_API_URL);
@@ -99,11 +129,21 @@ const Home = () => {
     } finally {
       setSensorLoading(false);
     }
-  };
+  }, [flattenData]);
 
   useEffect(() => {
     fetchSensorData();
-  }, []);
+  }, [fetchSensorData]);
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      publishGetDataRequest("refresh");
+      await Promise.all([fetchSensorData(), loadSyncStatus()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchSensorData, loadSyncStatus]);
 
   const sensorEntries = useMemo(() => {
     if (!sensorData) return [];
@@ -135,6 +175,9 @@ const Home = () => {
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
       >
         {/* Watermark Background */}
         <Typo
@@ -156,11 +199,24 @@ const Home = () => {
               Good Morning, {user?.name || "Hasara"}
             </Typo>
           </View>
-          <Image
-            source={getProfileImage(user?.image)}
-            style={styles.avatar}
-            contentFit="cover"
-          />
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={handleRefresh}
+              disabled={refreshing}
+            >
+              <Icons.ArrowsClockwise
+                size={18}
+                color={colors.primary}
+                weight="bold"
+              />
+            </TouchableOpacity>
+            <Image
+              source={getProfileImage(user?.image)}
+              style={styles.avatar}
+              contentFit="cover"
+            />
+          </View>
         </View>
 
         {/* System Status Card */}
@@ -368,7 +424,9 @@ const Home = () => {
             </Typo>
             <Typo size={12} color={colors.primary} fontWeight="600">
               Stable
+              Today App Opens: {awsAppVisitCount ?? "-"}
             </Typo>
+            
           </View>
         </View>
 
@@ -486,6 +544,21 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: spacingY._10,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  refreshButton: {
+    width: verticalScale(36),
+    height: verticalScale(36),
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
   },
   avatar: {
     width: verticalScale(45),

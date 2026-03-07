@@ -1,6 +1,7 @@
 import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY } from "@/constants/theme";
+import { fetchSyncStatus } from "@/services/syncService";
 import { verticalScale } from "@/utils/styling";
 import {
   processDayData,
@@ -8,9 +9,10 @@ import {
   processMonthData,
   processYearData,
 } from "@/utils/syncChartProcessor";
+import { useFocusEffect } from "@react-navigation/native";
 
 import * as Icon from "phosphor-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -20,9 +22,22 @@ import {
   View,
 } from "react-native";
 
+type SensorRecord = Record<string, any>;
+
+type HistoryCard = {
+  id: number;
+  label: string;
+  value: string;
+  icon: keyof typeof Icon;
+  keyName: string;
+};
+
 const DataManagement = () => {
   const [selectedPeriod, setSelectedPeriod] = useState("Week");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [historyCards, setHistoryCards] = useState<HistoryCard[]>([]);
+  const [latestSyncedAt, setLatestSyncedAt] = useState<string>("");
+  const lastKnownSyncRef = useRef<string>("");
 
   const [chartData, setChartData] = useState<any>({
     Day: [],
@@ -33,28 +48,188 @@ const DataManagement = () => {
 
   const periods = ["Day", "Week", "Month", "Year"];
 
-  useEffect(() => {
-    fetchSensorData();
-  }, []);
+  const flattenData = (
+    obj: Record<string, any>,
+    prefix = ""
+  ): Record<string, any> => {
+    let result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        Object.assign(result, flattenData(value, `${prefix}${key}_`));
+      } else {
+        result[`${prefix}${key}`] = value;
+      }
+    }
+    return result;
+  };
 
-  const fetchSensorData = async () => {
+  const getTimestampMs = (record: SensorRecord): number | null => {
+    const rawTimestamp =
+      record.timestamp ?? record.timeStamp ?? record.createdAt ?? record.time;
+
+    if (rawTimestamp == null) return null;
+
+    const numericTimestamp = Number(rawTimestamp);
+    if (Number.isNaN(numericTimestamp)) return null;
+
+    return numericTimestamp < 1000000000000
+      ? numericTimestamp * 1000
+      : numericTimestamp;
+  };
+
+  const getLatestRecord = (records: SensorRecord[]): SensorRecord | null => {
+    if (records.length === 0) return null;
+
+    let latest = records[0];
+    let latestTime = getTimestampMs(latest) ?? 0;
+
+    for (const record of records) {
+      const currentTime = getTimestampMs(record) ?? 0;
+      if (currentTime > latestTime) {
+        latest = record;
+        latestTime = currentTime;
+      }
+    }
+
+    return latest;
+  };
+
+  const buildHistoryCards = (record: SensorRecord): HistoryCard[] => {
+    const flattened = flattenData(record);
+    const entries = Object.entries(flattened).filter(([key, value]) => {
+      if (value == null) return false;
+      if (["timestamp", "timeStamp", "createdAt", "time"].includes(key)) {
+        return false;
+      }
+      return typeof value === "number" || !Number.isNaN(Number(value));
+    });
+
+    const priorityMatchers: {
+      label: string;
+      icon: keyof typeof Icon;
+      match: RegExp;
+    }[] = [
+      { label: "Temperature", icon: "Thermometer", match: /temp|temperature/i },
+      { label: "Humidity", icon: "Drop", match: /humidity/i },
+      { label: "Power", icon: "Lightning", match: /power|watt|kw|kwh/i },
+      { label: "Voltage", icon: "PlugCharging", match: /volt|voltage/i },
+    ];
+
+    const usedKeys = new Set<string>();
+    const cards: HistoryCard[] = [];
+
+    for (const matcher of priorityMatchers) {
+      const found = entries.find(([key]) => matcher.match.test(key));
+      if (!found) continue;
+
+      const [key, value] = found;
+      if (usedKeys.has(key)) continue;
+
+      usedKeys.add(key);
+      cards.push({
+        id: cards.length + 1,
+        label: matcher.label,
+        value: String(value),
+        icon: matcher.icon,
+        keyName: key,
+      });
+    }
+
+    if (cards.length < 4) {
+      for (const [key, value] of entries) {
+        if (usedKeys.has(key)) continue;
+        cards.push({
+          id: cards.length + 1,
+          label: key.replace(/_/g, " "),
+          value: String(value),
+          icon: "ChartBar",
+          keyName: key,
+        });
+        if (cards.length >= 4) break;
+      }
+    }
+
+    return cards.slice(0, 4);
+  };
+
+  const fetchSensorData = useCallback(async () => {
     try {
       const response = await fetch(
         process.env.EXPO_PUBLIC_SENSOR_API_URL as string
       );
+      const payload = await response.json();
+      const data =
+        payload && typeof payload === "object" && "data" in payload
+          ? payload.data
+          : payload;
 
-      const data = await response.json();
+      const records: SensorRecord[] = Array.isArray(data)
+        ? data
+        : data && typeof data === "object"
+        ? [data]
+        : [];
 
       setChartData({
-        Day: processDayData(data),
-        Week: processWeekData(data),
-        Month: processMonthData(data),
-        Year: processYearData(data),
+        Day: processDayData(records as any),
+        Week: processWeekData(records as any),
+        Month: processMonthData(records as any),
+        Year: processYearData(records as any),
       });
+
+      const latest = getLatestRecord(records);
+      if (!latest) {
+        setHistoryCards([]);
+        setLatestSyncedAt("");
+        return;
+      }
+
+      const latestTimestamp = getTimestampMs(latest);
+      setLatestSyncedAt(
+        latestTimestamp ? new Date(latestTimestamp).toLocaleString() : ""
+      );
+      setHistoryCards(buildHistoryCards(latest));
     } catch (error) {
       console.log("Sensor fetch error:", error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchSensorData();
+  }, [fetchSensorData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const checkForNewSync = async () => {
+        try {
+          const status = await fetchSyncStatus();
+          if (!isActive || !status.lastSynced) return;
+
+          if (!lastKnownSyncRef.current) {
+            lastKnownSyncRef.current = status.lastSynced;
+            fetchSensorData();
+            return;
+          }
+
+          if (lastKnownSyncRef.current !== status.lastSynced) {
+            lastKnownSyncRef.current = status.lastSynced;
+            fetchSensorData();
+          }
+        } catch (error) {
+          console.log("Sync status check failed:", error);
+        }
+      };
+
+      checkForNewSync();
+      const interval = setInterval(checkForNewSync, 10000);
+
+      return () => {
+        isActive = false;
+        clearInterval(interval);
+      };
+    }, [fetchSensorData])
+  );
 
   const currentChartData = chartData[selectedPeriod] || [];
 
@@ -62,13 +237,6 @@ const DataManagement = () => {
     ...currentChartData.map((i: any) => i.value),
     1
   );
-
-  const historyData = [
-    { id: 1, name: "Computer System", count: 2, percentage: 20, icon: "Monitor" },
-    { id: 2, name: "Air Conditioner", count: 5, percentage: 40, icon: "Wind" },
-    { id: 3, name: "Livingroom", count: 6, percentage: 60, icon: "Couch" },
-    { id: 4, name: "CCTV Camera", count: 4, percentage: 50, icon: "Camera" },
-  ];
 
   return (
     <ScreenWrapper>
@@ -214,62 +382,41 @@ const DataManagement = () => {
                   History
                 </Typo>
 
-                <Pressable>
-                  <Typo size={14} fontWeight="600" color={colors.primary}>
-                    See More
-                  </Typo>
-                </Pressable>
+                <Typo size={12} color={colors.textSecondary}>
+                  {latestSyncedAt
+                    ? `Last sync: ${latestSyncedAt}`
+                    : "Waiting for sync"}
+                </Typo>
               </View>
 
               <View style={styles.historyList}>
-                {historyData.map((device) => {
-                  const DeviceIcon = (Icon as any)[device.icon];
+                {historyCards.map((card) => {
+                  const SensorIcon = (Icon as any)[card.icon];
 
                   return (
-                    <View key={device.id} style={styles.deviceItem}>
-                      <View style={styles.deviceInfo}>
+                    <View key={card.id} style={styles.historyCard}>
+                      <View style={styles.historyCardTop}>
                         <View style={styles.iconContainer}>
-                          {DeviceIcon && (
-                            <DeviceIcon
-                              size={24}
-                              color={colors.textPrimary}
-                            />
+                          {SensorIcon && (
+                            <SensorIcon size={20} color={colors.textPrimary} />
                           )}
                         </View>
-
-                        <View style={styles.deviceText}>
-                          <Typo
-                            size={16}
-                            fontWeight="600"
-                            color={colors.textPrimary}
-                          >
-                            {device.name}
-                          </Typo>
-
-                          <Typo size={12} color={colors.textSecondary}>
-                            {device.count} Devices
-                          </Typo>
-                        </View>
-                      </View>
-
-                      <View style={styles.percentageContainer}>
-                        <Typo size={20} fontWeight="700" color="#FFD700">
-                          {device.percentage}
-                        </Typo>
-
-                        <Typo
-                          size={12}
-                          color={colors.textSecondary}
-                          style={{ marginLeft: 2 }}
-                        >
-                          %
+                        <Typo size={12} color={colors.textSecondary}>
+                          {card.label}
                         </Typo>
                       </View>
 
-                      <View style={styles.separator} />
+                      <Typo size={24} fontWeight="700" color={colors.textPrimary}>
+                        {card.value}
+                      </Typo>
                     </View>
                   );
                 })}
+                {historyCards.length === 0 && (
+                  <Typo size={14} color={colors.textSecondary}>
+                    No synced sensor values found.
+                  </Typo>
+                )}
               </View>
             </View>
           </View>
@@ -391,43 +538,31 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
 
-  historyList: { gap: spacingY._15 },
-
-  deviceItem: {
-    position: "relative",
-    paddingBottom: spacingY._15,
+  historyList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacingY._12,
   },
 
-  deviceInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacingX._15,
+  historyCard: {
+    width: "48%",
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    padding: spacingX._12,
+    minHeight: 110,
+    justifyContent: "space-between",
+  },
+
+  historyCardTop: {
+    gap: spacingY._7,
   },
 
   iconContainer: {
-    width: 45,
-    height: 45,
-    borderRadius: 25,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
-  },
-
-  deviceText: { flex: 1 },
-
-  percentageContainer: {
-    position: "absolute",
-    right: 0,
-    top: 5,
-    flexDirection: "row",
-    alignItems: "baseline",
-  },
-
-  separator: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
 });
