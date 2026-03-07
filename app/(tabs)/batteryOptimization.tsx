@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import * as Icon from "phosphor-react-native";
 import React, { useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,12 +14,59 @@ import {
   View,
 } from "react-native";
 
+const BATTERY_PREDICTION_API_URL =
+  "https://ww4gn1az54.execute-api.eu-north-1.amazonaws.com/predict";
+const BATTERY_DEVICE_ID = "Raspberry";
+
 const BatteryOptimization = () => {
   const [batteryLevel] = useState(12);
+  const [isPredicting, setIsPredicting] = useState(false);
   const router = useRouter();
 
   const handlePowerDrainingPress = () => {
     router.push("/battery_runtime/page");
+  };
+
+  const handleGetPredictions = async () => {
+    if (isPredicting) return;
+
+    const requestId = `BA-${Date.now()}`;
+
+    try {
+      setIsPredicting(true);
+
+      const response = await fetch(BATTERY_PREDICTION_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deviceId: BATTERY_DEVICE_ID,
+          requestId,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorMessage =
+          data?.error || data?.details || `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      Alert.alert(
+        "Prediction Requested",
+        `Request sent successfully.\nRequest ID: ${requestId}`
+      );
+      console.log("Battery prediction request response:", data);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to trigger prediction";
+      Alert.alert("Request Failed", message);
+      console.log("Battery prediction request error:", error);
+    } finally {
+      setIsPredicting(false);
+    }
   };
 
   return (
@@ -149,6 +197,16 @@ const BatteryOptimization = () => {
                 </View>
               </View>
             </View>
+
+            <Pressable
+              style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
+              onPress={handleGetPredictions}
+              disabled={isPredicting}
+            >
+              <Typo size={14} fontWeight="700" color="#000">
+                {isPredicting ? "Requesting..." : "Get Predictions"}
+              </Typo>
+            </Pressable>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -394,5 +452,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+
+  predictionButton: {
+    marginTop: spacingY._5,
+    width: "100%",
+    backgroundColor: "#7CFC00",
+    borderRadius: 14,
+    paddingVertical: spacingY._12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buttonDisabled: {
+    opacity: 0.65,
   },
 });

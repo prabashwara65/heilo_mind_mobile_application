@@ -96,7 +96,7 @@ const SolarForecasting = () => {
             {/* Prediction Card */}
             <View style={styles.predictionCard}>
               <Typo size={20} fontWeight="700" color="#fff">
-                Today's Predicted Energy Generation
+                Today Predicted Energy Generation
               </Typo>
               <View style={styles.valueRow}>
                 <Typo size={56} fontWeight="800" color="#fff">
