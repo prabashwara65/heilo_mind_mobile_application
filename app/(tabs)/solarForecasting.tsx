@@ -6,16 +6,18 @@ import { verticalScale } from "@/utils/styling";
 import { useRouter } from "expo-router";
 import * as Icon from "phosphor-react-native";
 import React, { useState } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+
+const SOLAR_PREDICTION_API_URL =
+  process.env.EXPO_PUBLIC_SOLAR_PREDICTION_API_URL as string;
+const SOLAR_RESULT_API_URL =
+  process.env.EXPO_PUBLIC_SOLAR_RESULT_API_URL as string;
+const SOLAR_DEVICE_ID = process.env.EXPO_PUBLIC_SOLAR_DEVICE_ID as string;
 
 const SolarForecasting = () => {
   const router = useRouter();
   const [selectedTab, setSelectedTab] = useState("Today");
+  const [isPredicting, setIsPredicting] = useState(false);
 
   const tabs = ["Today", "Tomorrow", "7 Days"];
 
@@ -56,17 +58,119 @@ const SolarForecasting = () => {
   const graphHeight = 150;
   const maxValue = 100;
 
-  const calculateY = (value: number) => graphHeight - (value / maxValue) * graphHeight;
+  const calculateY = (value: number) =>
+    graphHeight - (value / maxValue) * graphHeight;
+
+  const wait = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * Fetch prediction result from API with retries
+   */
+  const fetchPredictionResult = async (requestId: string) => {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const url = `${SOLAR_RESULT_API_URL}?requestId=${encodeURIComponent(
+          requestId
+        )}`;
+        console.log(`Attempt ${attempt + 1} GET:`, url);
+
+        const response = await fetch(url);
+        if (response.status === 404) {
+          console.log("Result not ready yet (404)");
+          throw new Error("Result not ready");
+        }
+
+        const resultData = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          const errorMessage =
+            resultData?.error ||
+            resultData?.details ||
+            `HTTP ${response.status}`;
+          throw new Error(errorMessage);
+        }
+
+        if (resultData?.prediction !== undefined) {
+          return resultData;
+        }
+      } catch (error) {
+        lastError =
+          error instanceof Error ? error : new Error("Failed to fetch result");
+      }
+
+      await wait(2000); // wait 2s before retry
+    }
+
+    if (lastError) throw lastError;
+    throw new Error("Prediction result not available after multiple attempts.");
+  };
+
+  const handleGetPredictions = async () => {
+    if (isPredicting) return;
+
+    const requestId = `EN-${Date.now()}`;
+
+    try {
+      setIsPredicting(true);
+
+      // 1️⃣ Send prediction request
+      const response = await fetch(SOLAR_PREDICTION_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deviceId: SOLAR_DEVICE_ID,
+          requestId,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorMessage =
+          data?.error || data?.details || `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      console.log("Prediction request sent:", data);
+
+      // 2️⃣ Fetch prediction result (with retry)
+      const resultData = await fetchPredictionResult(requestId);
+      console.log("Prediction result fetched:", resultData);
+
+      const returnedRequestId =
+        resultData?.requestId ?? resultData?.requestid ?? requestId;
+      const predictionText =
+        typeof resultData?.prediction === "object"
+          ? JSON.stringify(resultData.prediction)
+          : String(resultData?.prediction ?? "N/A");
+
+      // 3️⃣ Show Alert
+      Alert.alert(
+        "Prediction Received",
+        `Request ID: ${returnedRequestId}\nPrediction: ${predictionText}`
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to trigger prediction";
+      Alert.alert("Request Failed", message);
+      console.log("Prediction error:", error);
+    } finally {
+      setIsPredicting(false);
+    }
+  };
 
   return (
     <ScreenWrapper>
-      <ScrollView 
-        style={{ flex: 1 }} 
+      <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          {/* Watermark Background */}
+          {/* Watermark */}
           <Typo
             size={70}
             fontWeight="800"
@@ -116,10 +220,7 @@ const SolarForecasting = () => {
               {tabs.map((tab) => (
                 <Pressable
                   key={tab}
-                  style={[
-                    styles.tabButton,
-                    selectedTab === tab && styles.activeTab
-                  ]}
+                  style={[styles.tabButton, selectedTab === tab && styles.activeTab]}
                   onPress={() => setSelectedTab(tab)}
                 >
                   <Typo
@@ -138,69 +239,35 @@ const SolarForecasting = () => {
               <Typo size={14} fontWeight="600" color={colors.textSecondary} style={styles.graphTitle}>
                 ENERGY GENERATION (kWh)
               </Typo>
-              
+
               <View style={styles.graphCard}>
-                <View style={styles.graphLabelsY}>
-                  <Typo size={10} color={colors.textSecondary}>Aug</Typo>
-                  <Typo size={10} color={colors.textSecondary}>1</Typo>
-                </View>
-
                 <View style={styles.chartArea}>
-                  {/* Grid Lines */}
-                  {[0, 1, 2, 3].map((i) => (
-                    <View 
-                      key={i} 
-                      style={[
-                        styles.gridLine, 
-                        { left: (i * graphWidth) / 4 }
-                      ]} 
-                    />
-                  ))}
-
                   {/* Line Chart */}
-                  <View style={styles.svgContainer}>
-                    {currentData.map((point, index) => {
-                      if (index === 0) return null;
-                      const prev = currentData[index - 1];
-                      const x1 = ((index - 1) / (currentData.length - 1)) * graphWidth;
-                      const y1 = calculateY(prev.value);
-                      const x2 = (index / (currentData.length - 1)) * graphWidth;
-                      const y2 = calculateY(point.value);
-
-                      const angle = Math.atan2(y2 - y1, x2 - x1);
-                      const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-
-                      return (
-                        <View
-                          key={index}
-                          style={[
-                            styles.lineSegment,
-                            {
-                              left: x1,
-                              top: y1,
-                              width: dist,
-                              transform: [{ rotate: `${(angle * 180) / Math.PI}deg` }],
-                            },
-                          ]}
-                        />
-                      );
-                    })}
-
-                    {/* Dots */}
-                    {currentData.map((point, index) => {
-                      const x = (index / (currentData.length - 1)) * graphWidth;
-                      const y = calculateY(point.value);
-                      return (
-                        <View
-                          key={`dot-${index}`}
-                          style={[styles.dataDot, { left: x - 4, top: y - 4 }]}
-                        />
-                      );
-                    })}
-                  </View>
+                  {currentData.map((point, index) => {
+                    if (index === 0) return null;
+                    const prev = currentData[index - 1];
+                    const x1 = ((index - 1) / (currentData.length - 1)) * graphWidth;
+                    const y1 = calculateY(prev.value);
+                    const x2 = (index / (currentData.length - 1)) * graphWidth;
+                    const y2 = calculateY(point.value);
+                    const angle = Math.atan2(y2 - y1, x2 - x1);
+                    const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+                    return (
+                      <View
+                        key={index}
+                        style={[
+                          styles.lineSegment,
+                          { left: x1, top: y1, width: dist, transform: [{ rotate: `${(angle * 180) / Math.PI}deg` }] },
+                        ]}
+                      />
+                    );
+                  })}
+                  {currentData.map((point, index) => {
+                    const x = (index / (currentData.length - 1)) * graphWidth;
+                    const y = calculateY(point.value);
+                    return <View key={index} style={[styles.dataDot, { left: x - 4, top: y - 4 }]} />;
+                  })}
                 </View>
-
-                {/* X Axis Labels */}
                 <View style={styles.xAxis}>
                   {currentData.map((point, index) => (
                     <Typo key={index} size={9} color={colors.textSecondary}>
@@ -211,11 +278,19 @@ const SolarForecasting = () => {
               </View>
             </View>
 
-            {/* Weather Report Button */}
-            <Button 
-              style={styles.weatherButton}
-              onPress={() => router.push("/(tabs)/weatherReport")}
+            {/* Prediction Button */}
+            <Pressable
+              style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
+              onPress={handleGetPredictions}
+              disabled={isPredicting}
             >
+              <Typo size={16} fontWeight="700" color="#000">
+                {isPredicting ? "Requesting..." : "Get Predictions"}
+              </Typo>
+            </Pressable>
+
+            {/* Weather Report Button */}
+            <Button style={styles.weatherButton} onPress={() => router.push("/(tabs)/weatherReport")}>
               <Typo size={18} fontWeight="700" color="#fff">
                 Weather Report {">"}
               </Typo>
@@ -230,12 +305,8 @@ const SolarForecasting = () => {
 export default SolarForecasting;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacingY._30,
-  },
+  container: { flex: 1 },
+  scrollContent: { paddingBottom: spacingY._30 },
   backgroundText: {
     position: "absolute",
     top: verticalScale(400),
@@ -245,19 +316,9 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     zIndex: -1,
   },
-  main: {
-    paddingHorizontal: spacingX._20,
-    paddingVertical: spacingY._20,
-    gap: spacingY._25,
-  },
-  header: {
-    gap: spacingY._5,
-  },
-  locationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacingY._5,
-  },
+  main: { paddingHorizontal: spacingX._20, paddingVertical: spacingY._20, gap: spacingY._25 },
+  header: { gap: spacingY._5 },
+  locationRow: { flexDirection: "row", alignItems: "center", marginTop: spacingY._5 },
   predictionCard: {
     backgroundColor: "#32CD32",
     borderRadius: 24,
@@ -268,87 +329,18 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  valueRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    marginVertical: spacingY._5,
-  },
-  tabContainer: {
-    flexDirection: "row",
-    gap: spacingX._15,
-  },
-  tabButton: {
-    flex: 1,
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#F5F5F5",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  activeTab: {
-    backgroundColor: "#32CD32",
-  },
-  graphSection: {
-    gap: spacingY._15,
-  },
-  graphTitle: {
-    letterSpacing: 1,
-  },
-  graphCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderRadius: 24,
-    padding: spacingX._20,
-    height: 250,
-  },
-  graphLabelsY: {
-    position: "absolute",
-    left: 15,
-    top: 40,
-    alignItems: "center",
-  },
-  chartArea: {
-    flex: 1,
-    marginTop: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.1)",
-    position: "relative",
-  },
-  gridLine: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-  },
-  svgContainer: {
-    flex: 1,
-    position: "relative",
-  },
-  lineSegment: {
-    position: "absolute",
-    height: 2,
-    backgroundColor: "#ADFF2F",
-    transformOrigin: "left center",
-  },
-  dataDot: {
-    position: "absolute",
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#ADFF2F",
-    borderWidth: 2,
-    borderColor: "#0A1E28",
-    zIndex: 2,
-  },
-  xAxis: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 10,
-  },
-  weatherButton: {
-    backgroundColor: "#32CD32",
-    height: 60,
-    borderRadius: 15,
-    marginTop: spacingY._10,
-  },
+  valueRow: { flexDirection: "row", alignItems: "baseline", marginVertical: spacingY._5 },
+  tabContainer: { flexDirection: "row", gap: spacingX._15 },
+  tabButton: { flex: 1, height: 50, borderRadius: 12, backgroundColor: "#F5F5F5", justifyContent: "center", alignItems: "center" },
+  activeTab: { backgroundColor: "#32CD32" },
+  graphSection: { gap: spacingY._15 },
+  graphTitle: { letterSpacing: 1 },
+  graphCard: { backgroundColor: "rgba(255, 255, 255, 0.05)", borderRadius: 24, padding: spacingX._20, height: 250 },
+  chartArea: { flex: 1, marginTop: 20, borderBottomWidth: 1, borderBottomColor: "rgba(255, 255, 255, 0.1)", position: "relative" },
+  lineSegment: { position: "absolute", height: 2, backgroundColor: "#ADFF2F", transformOrigin: "left center" },
+  dataDot: { position: "absolute", width: 8, height: 8, borderRadius: 4, backgroundColor: "#ADFF2F", borderWidth: 2, borderColor: "#0A1E28", zIndex: 2 },
+  xAxis: { flexDirection: "row", justifyContent: "space-between", marginTop: 10 },
+  predictionButton: { backgroundColor: "#ADFF2F", height: 56, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  buttonDisabled: { opacity: 0.7 },
+  weatherButton: { backgroundColor: "#32CD32", height: 60, borderRadius: 15, marginTop: spacingY._10 },
 });

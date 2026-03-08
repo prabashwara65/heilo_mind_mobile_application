@@ -5,14 +5,113 @@ import { verticalScale } from "@/utils/styling";
 import * as Icon from "phosphor-react-native";
 import React, { useState } from "react";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
 } from "react-native";
 
+const MIRROR_PREDICTION_API_URL =
+  "https://7w7nhxpbpg.execute-api.eu-north-1.amazonaws.com/predict";
+const MIRROR_RESULT_API_URL =
+  "https://rcik2ednid.execute-api.eu-north-1.amazonaws.com/get-result";
+const MIRROR_DEVICE_ID = "Raspberry";
+
 const MirrorRedirect = () => {
   const [controlMode, setControlMode] = useState("Auto");
+  const [isRequesting, setIsRequesting] = useState(false);
+
+  const wait = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  const fetchMirrorResult = async (requestId: string) => {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const url = `${MIRROR_RESULT_API_URL}?requestId=${encodeURIComponent(
+          requestId
+        )}`;
+        const response = await fetch(url);
+
+        if (response.status === 404) {
+          throw new Error("Result not ready");
+        }
+
+        const resultData = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const errorMessage =
+            resultData?.error ||
+            resultData?.details ||
+            `HTTP ${response.status}`;
+          throw new Error(errorMessage);
+        }
+
+        if (resultData?.prediction !== undefined) {
+          return resultData;
+        }
+      } catch (error) {
+        lastError =
+          error instanceof Error ? error : new Error("Failed to fetch result");
+      }
+
+      await wait(2000);
+    }
+
+    if (lastError) throw lastError;
+    throw new Error("Prediction result not available yet.");
+  };
+
+  const handleMirrorPredict = async () => {
+    if (isRequesting) return;
+
+    const requestId = `MI-${Date.now()}`;
+
+    try {
+      setIsRequesting(true);
+
+      const response = await fetch(MIRROR_PREDICTION_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deviceId: MIRROR_DEVICE_ID,
+          requestId,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessage =
+          data?.error || data?.details || `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      const resultData = await fetchMirrorResult(requestId);
+      const returnedRequestId =
+        resultData?.requestId ?? resultData?.requestid ?? requestId;
+      const predictionText =
+        typeof resultData?.prediction === "object"
+          ? JSON.stringify(resultData.prediction)
+          : String(resultData?.prediction ?? "N/A");
+
+      Alert.alert(
+        "Prediction Received",
+        `Request ID: ${returnedRequestId}\nPrediction: ${predictionText}`
+      );
+      console.log("Mirror prediction request response:", data);
+      console.log("Mirror prediction result response:", resultData);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to trigger prediction";
+      Alert.alert("Request Failed", message);
+      console.log("Mirror prediction request error:", error);
+    } finally {
+      setIsRequesting(false);
+    }
+  };
 
   return (
     <ScreenWrapper>
@@ -35,12 +134,31 @@ const MirrorRedirect = () => {
           <View style={styles.main}>
             {/* Header */}
             <View style={styles.header}>
-              <Typo size={28} fontWeight="700" color={colors.textPrimary}>
-                Solar Mirror Angle
-              </Typo>
-              <Typo size={16} color={colors.textSecondary}>
-                3D visualization & control
-              </Typo>
+              <View>
+                <Typo size={28} fontWeight="700" color={colors.textPrimary}>
+                  Solar Mirror Angle
+                </Typo>
+                <Typo size={16} color={colors.textSecondary}>
+                  3D visualization & control
+                </Typo>
+              </View>
+
+              <View style={styles.headerActions}>
+                <Pressable
+                  style={[
+                    styles.imageButton,
+                    isRequesting && styles.buttonDisabled,
+                  ]}
+                  onPress={handleMirrorPredict}
+                  disabled={isRequesting}
+                >
+                  <Icon.DeviceRotateIcon
+                    size={18}
+                    color={colors.primary}
+                    weight="bold"
+                  />
+                </Pressable>
+              </View>
             </View>
 
             {/* Current Angle Card */}
@@ -144,6 +262,7 @@ const MirrorRedirect = () => {
               </View>
             </View>
           </View>
+
         </View>
       </ScrollView>
     </ScreenWrapper>
@@ -174,7 +293,28 @@ const styles = StyleSheet.create({
     gap: spacingY._30,
   },
   header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     gap: spacingY._5,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  imageButton: {
+    width: verticalScale(36),
+    height: verticalScale(36),
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   angleCard: {
     backgroundColor: "#32CD32", // Primary green
