@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 export interface SyncStatus {
   lastSynced: string
   deviceCount: number
@@ -7,6 +9,15 @@ export interface SyncStatus {
 const SENSOR_API_URL = process.env.EXPO_PUBLIC_SENSOR_API_URL as string;
 
 export const fetchSyncStatus = async (): Promise<SyncStatus> => {
+  if (Platform.OS === "web") {
+    // This endpoint currently has no CORS headers for localhost web.
+    return {
+      lastSynced: new Date().toISOString(),
+      deviceCount: 0,
+      status: "Inactive",
+    };
+  }
+
   try {
     const response = await fetch(SENSOR_API_URL)
     if (!response.ok) throw new Error(`Request failed (${response.status}`)

@@ -8,7 +8,7 @@ import { verticalScale } from "@/utils/styling";
 import { Image } from "expo-image";
 import * as Icons from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Platform, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { trackAppOpen } from "@/services/visitTracker";
 import { trackAppOpenAWS } from "@/services/awsAppVisit";
 import { fetchSyncStatus, SyncStatus } from "@/services/syncService";
@@ -101,6 +101,12 @@ const Home = () => {
 
   //fetch sensor data
   const fetchSensorData = useCallback(async () => {
+    if (Platform.OS === "web") {
+      setSensorLoading(false);
+      setSensorError("Sensor API is unavailable on web (CORS).");
+      return;
+    }
+
     try {
       setSensorError(null);
       const response = await fetch(SENSOR_API_URL);

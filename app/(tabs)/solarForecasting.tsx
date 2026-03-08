@@ -12,12 +12,13 @@ import {
   StyleSheet,
   View,
 } from "react-native";
+import { Dimensions, FlatList } from "react-native";
 
 const SolarForecasting = () => {
   const router = useRouter();
   const [selectedTab, setSelectedTab] = useState("Today");
 
-  const tabs = ["Today", "Tomorrow", "7 Days"];
+  const tabs = ["Today", "Yesterday", "7 Days"];
 
   const graphData: { [key: string]: { time: string; value: number }[] } = {
     Today: [
@@ -30,7 +31,7 @@ const SolarForecasting = () => {
       { time: "0:00", value: 45 },
       { time: "5:00", value: 30 },
     ],
-    Tomorrow: [
+    Yesterday: [
       { time: "6:00", value: 15 },
       { time: "8:00", value: 40 },
       { time: "10:00", value: 25 },
@@ -58,6 +59,27 @@ const SolarForecasting = () => {
 
   const calculateY = (value: number) => graphHeight - (value / maxValue) * graphHeight;
 
+  const today = new Date();
+
+  const formattedDate = today.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const locationName = "Malabe, Sri Lanka";
+
+  const predictions = [
+  
+  { id: "1", label: "2 Days Ago", value: 14.7 },
+  { id: "2", label: "Yesterday", value: 16.2 },
+  { id: "3", label: "Today", value: 18.5 },
+];
+
+const { width } = Dimensions.get("window");
+const cardWidth = width * 0.75;
+
   return (
     <ScreenWrapper>
       <ScrollView 
@@ -66,15 +88,6 @@ const SolarForecasting = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          {/* Watermark Background */}
-          <Typo
-            size={70}
-            fontWeight="800"
-            color={colors.textSecondary}
-            style={styles.backgroundText}
-          >
-            Solar Monitor
-          </Typo>
 
           <View style={styles.main}>
             {/* Header */}
@@ -83,33 +96,43 @@ const SolarForecasting = () => {
                 Solar Energy Prediction
               </Typo>
               <Typo size={16} color={colors.textSecondary} style={{ marginTop: 4 }}>
-                Wednesday, December 16, 2025
+                {formattedDate}
               </Typo>
               <View style={styles.locationRow}>
                 <Icon.MapPin size={18} color="#FF4500" weight="fill" />
                 <Typo size={16} color={colors.textPrimary} style={{ marginLeft: 6 }}>
-                  Tangalle, Sri Lanka
+                  {locationName}
                 </Typo>
               </View>
             </View>
 
-            {/* Prediction Card */}
-            <View style={styles.predictionCard}>
-              <Typo size={20} fontWeight="700" color="#fff">
-                Today Predicted Energy Generation
-              </Typo>
-              <View style={styles.valueRow}>
-                <Typo size={56} fontWeight="800" color="#fff">
-                  18.5
-                </Typo>
-                <Typo size={24} fontWeight="600" color="#fff" style={{ marginLeft: 8, marginBottom: 10 }}>
-                  kWh
-                </Typo>
-              </View>
-              <Typo size={14} color="#fff" style={{ opacity: 0.9 }}>
-                Expected energy generation
-              </Typo>
-            </View>
+<FlatList
+  data={predictions}
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  snapToInterval={cardWidth + 20}
+  decelerationRate="fast"
+  contentContainerStyle={{ paddingHorizontal: (width - cardWidth) / 2 }}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item }) => (
+    <View style={[styles.sliderCard, { width: cardWidth }]}>
+      <Typo size={20} fontWeight="700" color="#fff">
+        {item.label}
+      </Typo>
+
+      <View style={styles.valueRow}>
+        <Typo size={48} fontWeight="700" color="#fff">
+          {item.value}
+        </Typo>
+        <Typo size={22} color="#fff"> kWh</Typo>
+      </View>
+
+      <Typo size={14} color="#fff">
+        *Predicted solar energy for the day
+      </Typo>
+    </View>
+  )}
+/>
 
             {/* Tab Selector */}
             <View style={styles.tabContainer}>
@@ -258,16 +281,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: spacingY._5,
   },
-  predictionCard: {
-    backgroundColor: "#32CD32",
-    borderRadius: 24,
-    padding: spacingX._20,
-    shadowColor: "#32CD32",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
-  },
+  predictionRow: {
+  flexDirection: "row",
+  gap: spacingX._10,
+},
+
+sliderCard: {
+  backgroundColor: "#32CD32",
+  borderRadius: 24,
+  padding: spacingX._20,
+  marginHorizontal: 10,
+  justifyContent: "center",
+  shadowColor: "#32CD32",
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.3,
+  shadowRadius: 12,
+  elevation: 8,
+},
   valueRow: {
     flexDirection: "row",
     alignItems: "baseline",
