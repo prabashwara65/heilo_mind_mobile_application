@@ -64,10 +64,52 @@ const SolarForecasting = () => {
   const wait = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
+  const normalizeApiPayload = (payload: any) => {
+    if (payload && typeof payload.body === "string") {
+      try {
+        return JSON.parse(payload.body);
+      } catch {
+        return payload;
+      }
+    }
+
+    return payload;
+  };
+
+  const isResultPending = (status: number, payload: any) => {
+    const message = String(
+      payload?.error || payload?.message || payload?.details || ""
+    ).toLowerCase();
+
+    return (
+      status === 404 ||
+      status === 202 ||
+      status === 429 ||
+      message.includes("not ready") ||
+      message.includes("not found") ||
+      message.includes("pending")
+    );
+  };
+
+  const extractSolarResultValue = (payload: any) => {
+    return (
+      payload?.prediction ??
+      payload?.data?.prediction ??
+      payload?.result?.prediction ??
+      payload?.total_energy_kwh ??
+      payload?.data?.total_energy_kwh ??
+      payload?.result?.total_energy_kwh
+    );
+  };
+
   /**
    * Fetch prediction result from API with retries
    */
   const fetchPredictionResult = async (requestId: string) => {
+    if (!SOLAR_RESULT_API_URL) {
+      throw new Error("Solar result API URL is not configured.");
+    }
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -78,12 +120,13 @@ const SolarForecasting = () => {
         console.log(`Attempt ${attempt + 1} GET:`, url);
 
         const response = await fetch(url);
-        if (response.status === 404) {
-          console.log("Result not ready yet (404)");
+        const rawResultData = await response.json().catch(() => ({}));
+        const resultData = normalizeApiPayload(rawResultData);
+
+        if (isResultPending(response.status, resultData)) {
+          console.log(`Result not ready yet (${response.status}), retrying...`);
           throw new Error("Result not ready");
         }
-
-        const resultData = await response.json().catch(() => ({}));
 
         if (!response.ok) {
           const errorMessage =
@@ -93,7 +136,16 @@ const SolarForecasting = () => {
           throw new Error(errorMessage);
         }
 
-        if (resultData?.prediction !== undefined) {
+        const hasPrediction = extractSolarResultValue(resultData) !== undefined;
+        const isSuccessfulPayload =
+          String(
+            resultData?.status ??
+              resultData?.data?.status ??
+              resultData?.result?.status ??
+              ""
+          ).toLowerCase() === "success";
+
+        if (hasPrediction || isSuccessfulPayload) {
           return resultData;
         }
       } catch (error) {
@@ -110,6 +162,14 @@ const SolarForecasting = () => {
 
   const handleGetPredictions = async () => {
     if (isPredicting) return;
+    if (!SOLAR_PREDICTION_API_URL) {
+      Alert.alert("Configuration Error", "Solar prediction API URL is missing.");
+      return;
+    }
+    if (!SOLAR_DEVICE_ID) {
+      Alert.alert("Configuration Error", "Solar device ID is missing.");
+      return;
+    }
 
     const requestId = `EN-${Date.now()}`;
 
@@ -126,7 +186,8 @@ const SolarForecasting = () => {
         }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const rawData = await response.json().catch(() => ({}));
+      const data = normalizeApiPayload(rawData);
 
       if (!response.ok) {
         const errorMessage =
@@ -137,15 +198,23 @@ const SolarForecasting = () => {
       console.log("Prediction request sent:", data);
 
       // 2️⃣ Fetch prediction result (with retry)
-      const resultData = await fetchPredictionResult(requestId);
+      const effectiveRequestId =
+        data?.requestId || data?.requestid || data?.data?.requestId || requestId;
+      const resultData = await fetchPredictionResult(effectiveRequestId);
       console.log("Prediction result fetched:", resultData);
 
       const returnedRequestId =
-        resultData?.requestId ?? resultData?.requestid ?? requestId;
+        resultData?.requestId ??
+        resultData?.requestid ??
+        resultData?.data?.requestId ??
+        effectiveRequestId;
+      const predictionValue = extractSolarResultValue(resultData);
       const predictionText =
-        typeof resultData?.prediction === "object"
-          ? JSON.stringify(resultData.prediction)
-          : String(resultData?.prediction ?? "N/A");
+        typeof predictionValue === "number"
+          ? `${predictionValue} kWh`
+          : typeof predictionValue === "object"
+          ? JSON.stringify(predictionValue)
+          : String(predictionValue ?? "N/A");
 
       // 3️⃣ Show Alert
       Alert.alert(

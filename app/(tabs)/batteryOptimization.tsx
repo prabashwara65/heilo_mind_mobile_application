@@ -16,10 +16,10 @@ import {
 } from "react-native";
 
 const BATTERY_PREDICTION_API_URL =
-  "https://ww4gn1az54.execute-api.eu-north-1.amazonaws.com/predict";
+  process.env.EXPO_PUBLIC_BATTERY_PREDICTION_API_URL as string;
 const BATTERY_RESULT_API_URL =
-  "https://dj6ijy2cpk.execute-api.eu-north-1.amazonaws.com/get-result";
-const BATTERY_DEVICE_ID = "Raspberry";
+  process.env.EXPO_PUBLIC_BATTERY_RESULT_API_URL as string;
+const BATTERY_DEVICE_ID = process.env.EXPO_PUBLIC_SOLAR_DEVICE_ID as string;
 
 const BatteryOptimization = () => {
   const [batteryLevel] = useState(12);
@@ -34,6 +34,44 @@ const BatteryOptimization = () => {
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const normalizeApiPayload = (payload: any) => {
+    if (payload && typeof payload.body === "string") {
+      try {
+        return JSON.parse(payload.body);
+      } catch {
+        return payload;
+      }
+    }
+
+    return payload;
+  };
+
+  const isResultPending = (status: number, payload: any) => {
+    const message = String(
+      payload?.error || payload?.message || payload?.details || ""
+    ).toLowerCase();
+
+    return (
+      status === 404 ||
+      status === 202 ||
+      status === 429 ||
+      message.includes("not ready") ||
+      message.includes("not found") ||
+      message.includes("pending")
+    );
+  };
+
+  const extractBatteryResultValue = (payload: any) => {
+    return (
+      payload?.prediction ??
+      payload?.data?.prediction ??
+      payload?.result?.prediction ??
+      payload?.runtime_optimized_hours ??
+      payload?.data?.runtime_optimized_hours ??
+      payload?.result?.runtime_optimized_hours
+    );
+  };
+
   // GET prediction result with retry
   const fetchBatteryResult = async (requestId: string) => {
     let lastError: Error | null = null;
@@ -46,13 +84,13 @@ const BatteryOptimization = () => {
         console.log(`Attempt ${attempt + 1} GET:`, url);
 
         const response = await fetch(url);
+        const rawResultData = await response.json().catch(() => ({}));
+        const resultData = normalizeApiPayload(rawResultData);
 
-        if (response.status === 404) {
-          console.log("Result not ready yet (404), retrying...");
+        if (isResultPending(response.status, resultData)) {
+          console.log(`Result not ready yet (${response.status}), retrying...`);
           throw new Error("Result not ready");
         }
-
-        const resultData = await response.json().catch(() => ({}));
 
         if (!response.ok) {
           const errorMessage =
@@ -60,7 +98,16 @@ const BatteryOptimization = () => {
           throw new Error(errorMessage);
         }
 
-        if (resultData?.prediction !== undefined) {
+        const hasPrediction = extractBatteryResultValue(resultData) !== undefined;
+        const isSuccessfulPayload =
+          String(
+            resultData?.status ??
+              resultData?.data?.status ??
+              resultData?.result?.status ??
+              ""
+          ).toLowerCase() === "success";
+
+        if (hasPrediction || isSuccessfulPayload) {
           return resultData;
         }
       } catch (error) {
@@ -93,7 +140,8 @@ const BatteryOptimization = () => {
         }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const rawData = await response.json().catch(() => ({}));
+      const data = normalizeApiPayload(rawData);
 
       if (!response.ok) {
         const errorMessage =
@@ -104,13 +152,19 @@ const BatteryOptimization = () => {
       console.log("Battery prediction request sent:", data);
 
       // 2️⃣ GET prediction result with retry
-      const resultData = await fetchBatteryResult(requestId);
+      const effectiveRequestId =
+        data?.requestId || data?.requestid || data?.data?.requestId || requestId;
+      const resultData = await fetchBatteryResult(effectiveRequestId);
       console.log("Battery prediction result fetched:", resultData);
 
+      const predictionValue = extractBatteryResultValue(resultData);
+
       const predictionText =
-        typeof resultData?.prediction === "object"
-          ? JSON.stringify(resultData.prediction)
-          : String(resultData?.prediction ?? "N/A");
+        typeof predictionValue === "number"
+          ? `${predictionValue.toFixed(2)}h`
+          : typeof predictionValue === "object"
+          ? JSON.stringify(predictionValue)
+          : String(predictionValue ?? "N/A");
 
       // Show result in UI
       setPredictedRuntime(predictionText);
