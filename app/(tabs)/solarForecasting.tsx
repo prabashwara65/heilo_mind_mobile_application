@@ -5,8 +5,9 @@ import { colors, spacingX, spacingY } from "@/constants/theme";
 import { verticalScale } from "@/utils/styling";
 import { useRouter } from "expo-router";
 import * as Icon from "phosphor-react-native";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Dimensions, FlatList } from "react-native";
 
 const SOLAR_PREDICTION_API_URL =
   process.env.EXPO_PUBLIC_SOLAR_PREDICTION_API_URL as string;
@@ -19,44 +20,61 @@ const SolarForecasting = () => {
   const [selectedTab, setSelectedTab] = useState("Today");
   const [isPredicting, setIsPredicting] = useState(false);
 
-  const tabs = ["Today", "Tomorrow", "7 Days"];
+  const tabs = ["Today", "Yesterday", "7 Days"];
+
+  const [sensorData, setSensorData] = useState<any[]>([]);
 
   const graphData: { [key: string]: { time: string; value: number }[] } = {
-    Today: [
-      { time: "6:00", value: 20 },
-      { time: "8:00", value: 35 },
-      { time: "10:00", value: 15 },
-      { time: "15:00", value: 30 },
-      { time: "17:00", value: 55 },
-      { time: "20:00", value: 40 },
-      { time: "0:00", value: 45 },
-      { time: "5:00", value: 30 },
-    ],
-    Tomorrow: [
-      { time: "6:00", value: 15 },
-      { time: "8:00", value: 40 },
-      { time: "10:00", value: 25 },
-      { time: "15:00", value: 35 },
-      { time: "17:00", value: 45 },
-      { time: "20:00", value: 30 },
-      { time: "0:00", value: 20 },
-      { time: "5:00", value: 25 },
-    ],
-    "7 Days": [
-      { time: "Mon", value: 50 },
-      { time: "Tue", value: 45 },
-      { time: "Wed", value: 60 },
-      { time: "Thu", value: 55 },
-      { time: "Fri", value: 70 },
-      { time: "Sat", value: 65 },
-      { time: "Sun", value: 80 },
-    ],
-  };
+  Today: [
+    { time: "06:00", value: 0.2 },
+    { time: "08:00", value: 0.4 },
+    { time: "10:00", value: 0.8 },
+    { time: "12:00", value: 1.2 },
+    { time: "14:00", value: 1.5 },
+    { time: "16:00", value: 1.1 },
+    { time: "18:00", value: 0.6 },
+    { time: "20:00", value: 0.2 },
+  ],
 
-  const currentData = graphData[selectedTab];
+  Yesterday: [
+    { time: "06:00", value: 0.1 },
+    { time: "08:00", value: 0.3 },
+    { time: "10:00", value: 0.7 },
+    { time: "12:00", value: 1.0 },
+    { time: "14:00", value: 0.7 },
+    { time: "16:00", value: 0.4 },
+    { time: "18:00", value: 0.15 },
+    { time: "20:00", value: 0.05 },
+  ],
+
+  "7 Days": [
+    { time: "Mon", value: 2.8 },
+    { time: "Tue", value: 3.1 },
+    { time: "Wed", value: 3.6 },
+    { time: "Thu", value: 3.2 },
+    { time: "Fri", value: 3.8 },
+    { time: "Sat", value: 3.4 },
+    { time: "Sun", value: 4.0 },
+  ],
+};
+
+  const buildGraphData = () => {
+  if (!sensorData || sensorData.length === 0) return [];
+
+  return sensorData.map((item: any) => ({
+    time: new Date(item.timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    value: Number(item.energy || item.power || 0),
+  }));
+};
+
+  const currentData =
+  selectedTab === "Today" ? buildGraphData() : graphData[selectedTab];
   const graphWidth = 320;
   const graphHeight = 150;
-  const maxValue = 100;
+  const maxValue = 4;
 
   const calculateY = (value: number) =>
     graphHeight - (value / maxValue) * graphHeight;
@@ -75,6 +93,54 @@ const SolarForecasting = () => {
 
     return payload;
   };
+
+  const fetchSensorData = async () => {
+  try {
+    const response = await fetch(
+      process.env.EXPO_PUBLIC_SENSOR_API_URL as string
+    );
+
+    const data = await response.json();
+
+    console.log("Sensor API response:", data);
+
+    setSensorData(data || []);
+  } catch (error) {
+    console.log("Sensor fetch error:", error);
+  }
+};
+
+useEffect(() => {
+  fetchSensorData();
+
+  const interval = setInterval(() => {
+    fetchSensorData();
+  }, 10000); // every 10 seconds
+
+  return () => clearInterval(interval);
+}, []);
+
+
+
+  const today = new Date();
+
+  const formattedDate = today.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const locationName = "Malabe, Sri Lanka";
+
+  const [predictions, setPredictions] = useState([
+  { id: "1", label: "2 Days Ago", value: 2.6 },
+  { id: "2", label: "Yesterday", value: 3.4 },
+  { id: "3", label: "Today", value: 0 },
+]);
+
+const { width } = Dimensions.get("window");
+const cardWidth = width * 0.75;
 
   const isResultPending = (status: number, payload: any) => {
     const message = String(
@@ -176,7 +242,7 @@ const SolarForecasting = () => {
     try {
       setIsPredicting(true);
 
-      // 1️⃣ Send prediction request
+      // Send prediction request
       const response = await fetch(SOLAR_PREDICTION_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,7 +263,7 @@ const SolarForecasting = () => {
 
       console.log("Prediction request sent:", data);
 
-      // 2️⃣ Fetch prediction result (with retry)
+      //Fetch prediction result (with retry)
       const effectiveRequestId =
         data?.requestId || data?.requestid || data?.data?.requestId || requestId;
       const resultData = await fetchPredictionResult(effectiveRequestId);
@@ -209,6 +275,16 @@ const SolarForecasting = () => {
         resultData?.data?.requestId ??
         effectiveRequestId;
       const predictionValue = extractSolarResultValue(resultData);
+
+      if (typeof predictionValue === "number") {
+  setPredictions((prev) =>
+    prev.map((item) =>
+      item.label === "Today"
+        ? { ...item, value: predictionValue }
+        : item
+    )
+  );
+}
       const predictionText =
         typeof predictionValue === "number"
           ? `${predictionValue} kWh`
@@ -216,7 +292,7 @@ const SolarForecasting = () => {
           ? JSON.stringify(predictionValue)
           : String(predictionValue ?? "N/A");
 
-      // 3️⃣ Show Alert
+      // Show Alert
       Alert.alert(
         "Prediction Received",
         `Request ID: ${returnedRequestId}\nPrediction: ${predictionText}`
@@ -239,15 +315,6 @@ const SolarForecasting = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          {/* Watermark */}
-          <Typo
-            size={70}
-            fontWeight="800"
-            color={colors.textSecondary}
-            style={styles.backgroundText}
-          >
-            Solar Monitor
-          </Typo>
 
           <View style={styles.main}>
             {/* Header */}
@@ -256,33 +323,43 @@ const SolarForecasting = () => {
                 Solar Energy Prediction
               </Typo>
               <Typo size={16} color={colors.textSecondary} style={{ marginTop: 4 }}>
-                Wednesday, December 16, 2025
+                {formattedDate}
               </Typo>
               <View style={styles.locationRow}>
                 <Icon.MapPin size={18} color="#FF4500" weight="fill" />
                 <Typo size={16} color={colors.textPrimary} style={{ marginLeft: 6 }}>
-                  Tangalle, Sri Lanka
+                  {locationName}
                 </Typo>
               </View>
             </View>
 
-            {/* Prediction Card */}
-            <View style={styles.predictionCard}>
-              <Typo size={20} fontWeight="700" color="#fff">
-                Today Predicted Energy Generation
-              </Typo>
-              <View style={styles.valueRow}>
-                <Typo size={56} fontWeight="800" color="#fff">
-                  18.5
-                </Typo>
-                <Typo size={24} fontWeight="600" color="#fff" style={{ marginLeft: 8, marginBottom: 10 }}>
-                  kWh
-                </Typo>
-              </View>
-              <Typo size={14} color="#fff" style={{ opacity: 0.9 }}>
-                Expected energy generation
-              </Typo>
-            </View>
+<FlatList
+  data={predictions}
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  snapToInterval={cardWidth + 20}
+  decelerationRate="fast"
+  contentContainerStyle={{ paddingHorizontal: (width - cardWidth) / 2 }}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item }) => (
+    <View style={[styles.sliderCard, { width: cardWidth }]}>
+      <Typo size={20} fontWeight="700" color="#fff">
+        {item.label}
+      </Typo>
+
+      <View style={styles.valueRow}>
+        <Typo size={48} fontWeight="700" color="#fff">
+          {item.value}
+        </Typo>
+        <Typo size={22} color="#fff"> kWh</Typo>
+      </View>
+
+      <Typo size={14} color="#fff">
+        *Predicted solar energy for the day
+      </Typo>
+    </View>
+  )}
+/>
 
             {/* Tab Selector */}
             <View style={styles.tabContainer}>
@@ -310,6 +387,7 @@ const SolarForecasting = () => {
               </Typo>
 
               <View style={styles.graphCard}>
+
                 <View style={styles.chartArea}>
                   {/* Line Chart */}
                   {currentData.map((point, index) => {
@@ -347,23 +425,32 @@ const SolarForecasting = () => {
               </View>
             </View>
 
+            {/* Notification Section */}
+{predictions.find(p => p.label === "Today")?.value !== undefined && (
+  <View style={styles.notificationCard}>
+    <Typo size={16} fontWeight="600" color="#fff" style={{ marginBottom: 8 }}>
+      Energy Suggestion
+    </Typo>
+    <Typo size={14} color="#fff">
+      {predictions.find(p => p.label === "Today")!.value > 10
+        ? "Predicted solar energy is high today. It's a good idea to run high-power tasks using solar energy."
+        : "Predicted solar energy is low today. Consider conserving energy or using minimal high-power devices."}
+    </Typo>
+  </View>
+)}
+
             {/* Prediction Button */}
             <Pressable
-              style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
-              onPress={handleGetPredictions}
-              disabled={isPredicting}
-            >
-              <Typo size={16} fontWeight="700" color="#000">
-                {isPredicting ? "Requesting..." : "Get Predictions"}
-              </Typo>
-            </Pressable>
-
-            {/* Weather Report Button */}
-            <Button style={styles.weatherButton} onPress={() => router.push("/(tabs)/weatherReport")}>
-              <Typo size={18} fontWeight="700" color="#fff">
-                Weather Report {">"}
-              </Typo>
-            </Button>
+  style={[styles.refreshButton, isPredicting && styles.buttonDisabled]}
+  onPress={handleGetPredictions}
+  disabled={isPredicting}
+>
+  <Icon.ArrowClockwise
+    size={26}
+    color="#ffffff"
+    weight="bold"
+  />
+</Pressable>
           </View>
         </View>
       </ScrollView>
@@ -412,4 +499,49 @@ const styles = StyleSheet.create({
   predictionButton: { backgroundColor: "#ADFF2F", height: 56, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   buttonDisabled: { opacity: 0.7 },
   weatherButton: { backgroundColor: "#32CD32", height: 60, borderRadius: 15, marginTop: spacingY._10 },
+  sliderCard: {
+  backgroundColor: "#32CD32",
+  borderRadius: 24,
+  padding: spacingX._20,
+  marginHorizontal: 10,
+  justifyContent: "center",
+  shadowColor: "#32CD32",
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.3,
+  shadowRadius: 12,
+  elevation: 8,
+},
+refreshButton: {
+  width: 70,
+  height: 70,
+  borderRadius: 40,
+  backgroundColor: "rgba(255, 255, 255, 0.1)",
+  justifyContent: "center",
+  top: 30,
+  alignItems: "center",
+  alignSelf: "center",
+  shadowColor: "rgba(255, 255, 255, 0.1)",
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.2,
+  shadowRadius: 10,
+  elevation: 6,
+},
+graphLabelsY: {
+    position: "absolute",
+    left: 15,
+    top: 40,
+    alignItems: "center",
+  },
+  notificationCard: {
+  backgroundColor: "#f1b23c",
+  borderRadius: 20,
+  padding: spacingX._20,
+  marginVertical: spacingY._15,
+  shadowColor: "#f1b23c",
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.3,
+  shadowRadius: 12,
+  elevation: 6,
+},
 });
+

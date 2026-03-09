@@ -57,16 +57,6 @@ const WeatherReport = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          {/* Watermark Background */}
-          <Typo
-            size={70}
-            fontWeight="800"
-            color={colors.textSecondary}
-            style={styles.backgroundText}
-          >
-            Solar Monitor
-          </Typo>
-
           <View style={styles.main}>
             {/* Title */}
             <Typo size={28} fontWeight="700" color={colors.textPrimary} style={styles.pageTitle}>

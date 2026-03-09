@@ -8,7 +8,7 @@ import { verticalScale } from "@/utils/styling";
 import { Image } from "expo-image";
 import * as Icons from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Platform, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { trackAppOpen } from "@/services/visitTracker";
 import { trackAppOpenAWS } from "@/services/awsAppVisit";
 import { fetchSyncStatus, SyncStatus } from "@/services/syncService";
@@ -16,6 +16,99 @@ import { publishGetDataRequest } from "@/services/awsIotPublisher";
 
 const SENSOR_API_URL =
   "https://m5isvhcq7e.execute-api.eu-north-1.amazonaws.com/sensor?deviceId=Raspberry";
+const SOLAR_PREDICTION_API_URL =
+  process.env.EXPO_PUBLIC_SOLAR_PREDICTION_API_URL as string;
+const SOLAR_RESULT_API_URL =
+  process.env.EXPO_PUBLIC_SOLAR_RESULT_API_URL as string;
+const SOLAR_DEVICE_ID = process.env.EXPO_PUBLIC_SOLAR_DEVICE_ID as string;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeApiPayload = (payload: any) => {
+  if (payload && typeof payload.body === "string") {
+    try {
+      return JSON.parse(payload.body);
+    } catch {
+      return payload;
+    }
+  }
+
+  return payload;
+};
+
+const isResultPending = (status: number, payload: any) => {
+  const message = String(
+    payload?.error || payload?.message || payload?.details || "",
+  ).toLowerCase();
+
+  return (
+    status === 404 ||
+    status === 202 ||
+    status === 429 ||
+    message.includes("not ready") ||
+    message.includes("not found") ||
+    message.includes("pending")
+  );
+};
+
+const extractSolarResultValue = (payload: any) => {
+  return (
+    payload?.prediction ??
+    payload?.data?.prediction ??
+    payload?.result?.prediction ??
+    payload?.total_energy_kwh ??
+    payload?.data?.total_energy_kwh ??
+    payload?.result?.total_energy_kwh
+  );
+};
+
+const fetchPredictionResult = async (requestId: string) => {
+  if (!SOLAR_RESULT_API_URL) {
+    throw new Error("Solar result API URL is not configured.");
+  }
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const url = `${SOLAR_RESULT_API_URL}?requestId=${encodeURIComponent(requestId)}`;
+      const response = await fetch(url);
+      const rawResultData = await response.json().catch(() => ({}));
+      const resultData = normalizeApiPayload(rawResultData);
+
+      if (isResultPending(response.status, resultData)) {
+        throw new Error("Result not ready");
+      }
+
+      if (!response.ok) {
+        const errorMessage =
+          resultData?.error || resultData?.details || `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      const hasPrediction = extractSolarResultValue(resultData) !== undefined;
+      const isSuccessfulPayload =
+        String(
+          resultData?.status ??
+            resultData?.data?.status ??
+            resultData?.result?.status ??
+            "",
+        ).toLowerCase() === "success";
+
+      if (hasPrediction || isSuccessfulPayload) {
+        return resultData;
+      }
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error("Failed to fetch result");
+    }
+
+    await wait(2000);
+  }
+
+  if (lastError) throw lastError;
+  throw new Error("Prediction result not available after multiple attempts.");
+};
 
 const Home = () => {
   const { user } = useAuth();
@@ -33,6 +126,48 @@ const Home = () => {
   const [awsAppVisitCount, setAwsAppVisitCount] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const hasVisitedDashboardOnce = useRef(false);
+  const [solarPrediction, setSolarPrediction] = useState<number | null>(null);
+  const [solarLoading, setSolarLoading] = useState(false);
+  const [solarError, setSolarError] = useState<string | null>(null);
+
+  const fetchSolarPrediction = useCallback(async () => {
+  if (!SOLAR_PREDICTION_API_URL || !SOLAR_DEVICE_ID) {
+    setSolarError("Prediction API or Device ID not configured");
+    return;
+  }
+
+  try {
+    setSolarLoading(true);
+    setSolarError(null);
+
+    // Send prediction request
+    const requestId = `EN-${Date.now()}`;
+    const response = await fetch(SOLAR_PREDICTION_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: SOLAR_DEVICE_ID, requestId }),
+    });
+
+    const rawData = await response.json().catch(() => ({}));
+    const data = normalizeApiPayload(rawData);
+
+    if (!response.ok) throw new Error(data?.error || "Failed request");
+
+    // Fetch the result with retries
+    const result = await fetchPredictionResult(data?.requestId || requestId);
+    const value = extractSolarResultValue(result);
+
+    if (typeof value === "number") setSolarPrediction(value);
+  } catch (err) {
+    setSolarError(err instanceof Error ? err.message : "Failed to fetch prediction");
+  } finally {
+    setSolarLoading(false);
+  }
+}, []);
+
+useEffect(() => {
+  fetchSolarPrediction();
+}, [fetchSolarPrediction]);
 
   const recordVisit = useCallback(async () => {
     if (!user?.uid) return;
@@ -101,6 +236,12 @@ const Home = () => {
 
   //fetch sensor data
   const fetchSensorData = useCallback(async () => {
+    if (Platform.OS === "web") {
+      setSensorLoading(false);
+      setSensorError("Sensor API is unavailable on web (CORS).");
+      return;
+    }
+
     try {
       setSensorError(null);
       const response = await fetch(SENSOR_API_URL);
@@ -280,128 +421,31 @@ const Home = () => {
 
         {/* Solar Prediction Card */}
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Typo size={16} fontWeight="600">
-              Solar Prediction
-            </Typo>
-            <Icons.Sun size={24} color={colors.primary} weight="fill" />
-          </View>
-          <Typo size={36} fontWeight="700" style={styles.cardValue}>
-            6.8 kW
-          </Typo>
-          <Typo
-            size={12}
-            color={colors.textSecondary}
-            style={styles.cardSubValue}
-          >
-            Peak expected at 12:45 PM
-          </Typo>
+  <View style={styles.cardHeader}>
+    <Typo size={16} fontWeight="600">Solar Prediction</Typo>
+    <Icons.Sun size={24} color={colors.primary} weight="fill" />
+  </View>
 
-          {/* Mini Graph */}
-          <View style={styles.miniGraphContainer}>
-            <Typo
-              size={14}
-              fontWeight="600"
-              color="#fff"
-              style={styles.graphTitle}
-            >
-              ENERGY GENERATION (kWh)
-            </Typo>
+  <Typo size={36} fontWeight="700" style={styles.cardValue}>
+    {solarLoading
+      ? "Loading..."
+      : solarError
+      ? "Error"
+      : solarPrediction !== null
+      ? `${solarPrediction} kWh`
+      : "-"}
+  </Typo>
 
-            <View style={styles.graphCard}>
-              <View style={styles.graphLabelsY}>
-                <Typo size={10} color={colors.primary}>
-                  Aug
-                </Typo>
-                <Typo size={10} color={colors.primary}>
-                  1
-                </Typo>
-              </View>
+  <Typo size={12} color={colors.textSecondary} style={styles.cardSubValue}>
+    {solarLoading
+      ? "Fetching latest prediction..."
+      : solarError
+      ? solarError
+      : "Peak expected at 12:45 PM"}
+  </Typo>
 
-              <View style={styles.chartArea}>
-                {/* Vertical Grid Lines */}
-                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                  <View
-                    key={i}
-                    style={[styles.gridLine, { left: (i * graphWidth) / 6 }]}
-                  />
-                ))}
-
-                {/* Graph Content */}
-                <View style={styles.svgContainer}>
-                  {/* Area Fill simulation */}
-                  <View style={styles.areaFill} />
-
-                  {/* Line Segments */}
-                  {solarGraphData.map((point, index) => {
-                    if (index === 0) return null;
-                    const prev = solarGraphData[index - 1];
-                    const x1 =
-                      ((index - 1) / (solarGraphData.length - 1)) * graphWidth;
-                    const y1 = calculateY(prev.value);
-                    const x2 =
-                      (index / (solarGraphData.length - 1)) * graphWidth;
-                    const y2 = calculateY(point.value);
-
-                    const angle = Math.atan2(y2 - y1, x2 - x1);
-                    const dist = Math.sqrt(
-                      Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2),
-                    );
-
-                    return (
-                      <View
-                        key={index}
-                        style={[
-                          styles.lineSegment,
-                          {
-                            left: x1,
-                            top: y1,
-                            width: dist,
-                            transform: [
-                              { rotate: `${(angle * 180) / Math.PI}deg` },
-                            ],
-                          },
-                        ]}
-                      />
-                    );
-                  })}
-
-                  {/* Hollow Dots */}
-                  {solarGraphData.map((point, index) => {
-                    const x =
-                      (index / (solarGraphData.length - 1)) * graphWidth;
-                    const y = calculateY(point.value);
-                    return (
-                      <View
-                        key={`dot-${index}`}
-                        style={[styles.dataDot, { left: x - 4, top: y - 4 }]}
-                      />
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Tick Marks and X-Axis */}
-              <View style={styles.xAxisContainer}>
-                <View style={styles.ticksRow}>
-                  {[...Array(25)].map((_, i) => (
-                    <View
-                      key={i}
-                      style={[styles.tick, i % 4 === 0 && styles.longTick]}
-                    />
-                  ))}
-                </View>
-                <View style={styles.xAxisLabels}>
-                  {solarGraphData.map((point, index) => (
-                    <Typo key={index} size={9} color={colors.textSecondary}>
-                      {point.time}
-                    </Typo>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
+  {/* Mini Graph (optional, can reuse solarGraphData from state if needed) */}
+</View>
 
         {/* Battery Runtime Card */}
         <View style={styles.card}>
