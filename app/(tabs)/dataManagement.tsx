@@ -271,15 +271,8 @@ const DataManagement = () => {
               <View style={styles.cardHeader}>
                 <View>
                   <View style={styles.valueRow}>
-                    <Typo size={32} fontWeight="700" color="#000">
-                      78.36
-                    </Typo>
-                    <Typo
-                      size={14}
-                      color="#000"
-                      style={{ marginLeft: 5, marginBottom: 5 }}
-                    >
-                      Kwh
+                    <Typo size={20} fontWeight="700" color="#000">
+                      Solar Active 
                     </Typo>
                   </View>
 

@@ -13,6 +13,7 @@ import {
   StyleSheet,
   View,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 
 const BATTERY_PREDICTION_API_URL =
@@ -25,6 +26,7 @@ const BatteryOptimization = () => {
   const [batteryLevel] = useState(12);
   const [isPredicting, setIsPredicting] = useState(false);
   const [predictedRuntime, setPredictedRuntime] = useState<string | null>(null);
+  const [ledCount, setLedCount] = useState(1);
 
   const router = useRouter();
 
@@ -42,7 +44,6 @@ const BatteryOptimization = () => {
         return payload;
       }
     }
-
     return payload;
   };
 
@@ -72,7 +73,6 @@ const BatteryOptimization = () => {
     );
   };
 
-  // GET prediction result with retry
   const fetchBatteryResult = async (requestId: string) => {
     let lastError: Error | null = null;
 
@@ -114,7 +114,7 @@ const BatteryOptimization = () => {
         lastError = error instanceof Error ? error : new Error("Failed to fetch result");
       }
 
-      await wait(2000); // wait 2s before retry
+      await wait(2000);
     }
 
     if (lastError) throw lastError;
@@ -130,13 +130,13 @@ const BatteryOptimization = () => {
       setIsPredicting(true);
       setPredictedRuntime(null);
 
-      // 1️⃣ POST prediction request
       const response = await fetch(BATTERY_PREDICTION_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           deviceId: BATTERY_DEVICE_ID,
           requestId,
+          led_count: ledCount,
         }),
       });
 
@@ -151,7 +151,6 @@ const BatteryOptimization = () => {
 
       console.log("Battery prediction request sent:", data);
 
-      // 2️⃣ GET prediction result with retry
       const effectiveRequestId =
         data?.requestId || data?.requestid || data?.data?.requestId || requestId;
       const resultData = await fetchBatteryResult(effectiveRequestId);
@@ -166,8 +165,9 @@ const BatteryOptimization = () => {
           ? JSON.stringify(predictionValue)
           : String(predictionValue ?? "N/A");
 
-      // Show result in UI
       setPredictedRuntime(predictionText);
+
+      setLedCount((prev) => (prev === 1 ? 2 : 1));
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to get prediction";
@@ -184,125 +184,132 @@ const BatteryOptimization = () => {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <View style={styles.container}>
-          {/* Watermark */}
-          <Typo
-            size={70}
-            fontWeight="800"
-            color={colors.textSecondary}
-            style={styles.backgroundText}
-          >
-            solar monitor
-          </Typo>
-
-          {/* Main Content */}
-          <View style={styles.main}>
-            {/* Title */}
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+          <View style={styles.container}>
+            {/* Watermark */}
             <Typo
-              size={28}
-              fontWeight="700"
-              color={colors.textPrimary}
-              style={{ textAlign: "center", marginBottom: spacingY._10 }}
+              size={70}
+              fontWeight="800"
+              color={colors.textSecondary}
+              style={styles.backgroundText}
             >
-              Battery Runtime
+              solar monitor
             </Typo>
 
-            {/* Battery Visualization */}
-            <View style={styles.batteryContainer}>
-              <View style={styles.batteryFrame}>
-                <View style={styles.batteryCap} />
-                <View style={styles.batteryBody}>
-                  <View style={styles.topIconContainer}>
-                    <Icon.Lightning size={40} color="#90EE90" weight="fill" />
-                  </View>
-                  <View style={[styles.batteryFill, { height: `${batteryLevel}%` }]}>
-                    <View style={styles.innerGlowBottom} />
-                    <View style={styles.innerGlowMiddle} />
-                    <View style={styles.innerGlowTop} />
-                  </View>
-                  <View style={styles.percentageContainer}>
-                    <Typo size={48} fontWeight="700" color="#fff">
-                      {batteryLevel}
-                    </Typo>
-                    <Typo
-                      size={20}
-                      fontWeight="600"
-                      color="#fff"
-                      style={{ marginLeft: 4 }}
-                    >
-                      %
-                    </Typo>
-                  </View>
-                </View>
-              </View>
-            </View>
+            {/* Main Content */}
+            <View style={styles.main}>
+              {/* Title */}
+              <Typo
+                size={28}
+                fontWeight="700"
+                color={colors.textPrimary}
+                style={{ textAlign: "center", marginBottom: spacingY._10 }}
+              >
+                Battery Runtime
+              </Typo>
 
-            {/* Widgets */}
-            <View style={styles.widgetsContainer}>
-              <View style={styles.widgetRow}>
-                <View style={styles.widgetLarge}>
-                  <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                    REMAINING BATTERY LIFE
-                  </Typo>
-                  <Typo size={32} fontWeight="700" color="#000">
-                    {predictedRuntime ? predictedRuntime : "5.13h"}
-                  </Typo>
-                </View>
-                <Pressable style={styles.widgetSmall} onPress={handlePowerDrainingPress}>
-                  <View style={styles.widgetSmallContent}>
-                    <View>
-                      <Typo size={28} fontWeight="700" color="#000">
-                        18
+              {/* Battery Visualization */}
+              <View style={styles.batteryContainer}>
+                <View style={styles.batteryFrame}>
+                  <View style={styles.batteryCap} />
+                  <View style={styles.batteryBody}>
+                    <View style={styles.topIconContainer}>
+                      <Icon.Lightning size={40} color="#90EE90" weight="fill" />
+                    </View>
+                    <View style={[styles.batteryFill, { height: `${batteryLevel}%` }]}>
+                      <View style={styles.innerGlowBottom} />
+                      <View style={styles.innerGlowMiddle} />
+                      <View style={styles.innerGlowTop} />
+                    </View>
+                    <View style={styles.percentageContainer}>
+                      <Typo size={48} fontWeight="700" color="#fff">
+                        {batteryLevel}
                       </Typo>
-                      <Typo size={11} fontWeight="600" color="#000" style={{ marginTop: 4 }}>
-                        POWER DRAINING
-                      </Typo>
-                      <Typo size={10} color="#000">
-                        Devices
+                      <Typo size={20} fontWeight="600" color="#fff" style={{ marginLeft: 4 }}>
+                        %
                       </Typo>
                     </View>
-                    <Icon.CaretRight size={24} color="#000" weight="bold" />
                   </View>
-                </Pressable>
-              </View>
-
-              <View style={styles.widgetRow}>
-                <View style={styles.widgetSmall}>
-                  <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                    TIME TO FULLY CHARGE
-                  </Typo>
-                  <Typo size={28} fontWeight="700" color="#000">
-                    2h
-                  </Typo>
-                </View>
-
-                <View style={styles.widgetLarge}>
-                  <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                    State of Battery Health
-                  </Typo>
-                  <Typo size={32} fontWeight="700" color="#000">
-                    89%
-                  </Typo>
                 </View>
               </View>
-            </View>
 
-            {/* Prediction Button */}
-            <Pressable
-              style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
-              onPress={handleGetPredictions}
-              disabled={isPredicting}
-            >
-              {isPredicting ? (
-                <ActivityIndicator size="small" color="#000" />
-              ) : (
-                <Typo size={14} fontWeight="700" color="#000">
-                  Get Predictions
+              {/* Widgets */}
+              <View style={styles.widgetsContainer}>
+                <View style={styles.widgetRow}>
+                  <View style={styles.widgetLarge}>
+                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
+                      REMAINING BATTERY LIFE
+                    </Typo>
+                    <Typo size={32} fontWeight="700" color="#000">
+                      {predictedRuntime ? predictedRuntime : "5.13h"}
+                    </Typo>
+                  </View>
+                  <Pressable style={styles.widgetSmall} onPress={handlePowerDrainingPress}>
+                    <View style={styles.widgetSmallContent}>
+                      <View>
+                        <Typo size={28} fontWeight="700" color="#000">
+                          18
+                        </Typo>
+                        <Typo size={11} fontWeight="600" color="#000" style={{ marginTop: 4 }}>
+                          POWER DRAINING
+                        </Typo>
+                        <Typo size={10} color="#000">
+                          Devices
+                        </Typo>
+                      </View>
+                      <Icon.CaretRight size={24} color="#000" weight="bold" />
+                    </View>
+                  </Pressable>
+                </View>
+
+                <View style={styles.widgetRow}>
+                  <View style={styles.widgetSmall}>
+                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
+                      TIME TO FULLY CHARGE
+                    </Typo>
+                    <Typo size={28} fontWeight="700" color="#000">
+                      2h
+                    </Typo>
+                  </View>
+
+                  <View style={styles.widgetLarge}>
+                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
+                      State of Battery Health
+                    </Typo>
+                    <Typo size={32} fontWeight="700" color="#000">
+                      89%
+                    </Typo>
+                  </View>
+                </View>
+              </View>
+
+              {/* LED Count */}
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacingY._5 }}>
+                <Typo size={14} fontWeight="600" color={colors.textSecondary}>
+                  LEDs ON:
                 </Typo>
-              )}
-            </Pressable>
+                <Typo size={18} fontWeight="700" color="#7CFC00" style={{ marginLeft: 8 }}>
+                  {ledCount}
+                </Typo>
+              </View>
+
+              {/* Prediction Button */}
+              <Pressable
+                style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
+                onPress={handleGetPredictions}
+                disabled={isPredicting}
+              >
+                {isPredicting ? (
+                  <ActivityIndicator size="small" color="#000" />
+                ) : (
+                  <Typo size={14} fontWeight="700" color="#000">
+                    Get Predictions
+                  </Typo>
+                )}
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </ScreenWrapper>
   );
@@ -310,7 +317,6 @@ const BatteryOptimization = () => {
 
 export default BatteryOptimization;
 
-// Styles remain unchanged from your original code
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: "space-between" },
   backgroundText: {
@@ -322,7 +328,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
   main: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: spacingX._20,
     justifyContent: "center",
     alignItems: "center",
