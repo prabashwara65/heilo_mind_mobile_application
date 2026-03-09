@@ -4,6 +4,7 @@ import { colors, spacingX, spacingY } from "@/constants/theme";
 import { verticalScale } from "@/utils/styling";
 import * as Icon from "phosphor-react-native";
 import React, { useState } from "react";
+import * as Icons from "phosphor-react-native";
 import {
   Alert,
   Pressable,
@@ -121,15 +122,6 @@ const MirrorRedirect = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-          {/* Watermark Background */}
-          <Typo
-            size={70}
-            fontWeight="800"
-            color={colors.textSecondary}
-            style={styles.backgroundText}
-          >
-            Solar Monitor
-          </Typo>
 
           <View style={styles.main}>
             {/* Header */}
@@ -161,106 +153,47 @@ const MirrorRedirect = () => {
               </View>
             </View>
 
-            {/* Current Angle Card */}
-            <View style={styles.angleCard}>
-              <Typo size={18} fontWeight="600" color="#fff">
-                Current Mirror Angle
-              </Typo>
-              <View style={styles.angleValueContainer}>
-                <Typo size={64} fontWeight="800" color="#fff">
-                  37
-                </Typo>
-                <Typo size={32} fontWeight="700" color="#fff" style={styles.degreeSymbol}>
-                  °
-                </Typo>
-              </View>
-              <Typo size={14} color="#fff" style={styles.optimizationText}>
-                Optimized for maximum efficiency
-              </Typo>
-            </View>
+            {/* Solar Prediction Card */}
+<View style={styles.card}>
+  <View style={styles.cardHeader}>
+    <Typo size={16} fontWeight="600">IoT Connection Status</Typo>
+    <Icons.Sun size={24} color={colors.primary} weight="fill" />
+  </View>
 
-            {/* 3D Model View */}
-            <View style={styles.section}>
-              <Typo size={20} fontWeight="700" color={colors.textPrimary} style={styles.sectionTitle}>
-                3D Model View
-              </Typo>
-              <View style={styles.modelCard}>
-                <View style={styles.modelContainer}>
-                  {/* Stylized Solar Panel Model */}
-                  <View style={styles.modelVisual}>
-                    {/* Sun Indicator */}
-                    <View style={styles.sunIndicator}>
-                      <Icon.Sun size={32} color="#FFD700" weight="fill" />
-                      <Typo size={12} color={colors.textSecondary}>Sun</Typo>
-                    </View>
-                    
-                    {/* Angle Line */}
-                    <View style={styles.angleLineContainer}>
-                      <View style={styles.dottedLine} />
-                      <Typo size={12} color={colors.textSecondary} style={styles.angleLabel}>37°</Typo>
-                    </View>
+  {/* Hardcoded Prediction Value */}
+  <Typo size={36} fontWeight="700" style={styles.cardValue}>
+    Connected
+  </Typo>
 
-                    {/* Solar Panel Visualization */}
-                    <View style={styles.panelWrapper}>
-                      <View style={styles.panelBase} />
-                      <View style={styles.panelStand} />
-                      <View style={styles.panelPlate}>
-                        <View style={styles.gridContainer}>
-                          {[...Array(9)].map((_, i) => (
-                            <View key={i} style={styles.gridCell} />
-                          ))}
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            </View>
+</View>
 
-            {/* Control Mode */}
-            <View style={styles.section}>
-              <Typo size={20} fontWeight="700" color={colors.textPrimary} style={styles.sectionTitle}>
-                Control Mode
-              </Typo>
-              <View style={styles.toggleContainer}>
-                <Pressable 
-                  style={[
-                    styles.toggleButton, 
-                    controlMode === "Auto" && styles.activeToggle
-                  ]}
-                  onPress={() => setControlMode("Auto")}
-                >
-                  <Typo 
-                    size={16} 
-                    fontWeight="700" 
-                    color={controlMode === "Auto" ? "#fff" : colors.textSecondary}
-                  >
-                    Auto
-                  </Typo>
-                </Pressable>
-                <Pressable 
-                  style={[
-                    styles.toggleButton, 
-                    controlMode === "Manual" && styles.activeToggleManual
-                  ]}
-                  onPress={() => setControlMode("Manual")}
-                >
-                  <Typo 
-                    size={16} 
-                    fontWeight="700" 
-                    color={controlMode === "Manual" ? colors.primary : colors.textSecondary}
-                  >
-                    Manual
-                  </Typo>
-                </Pressable>
-              </View>
-              <View style={styles.statusFooter}>
-                <Icon.ArrowsClockwise size={16} color={colors.textSecondary} />
-                <Typo size={14} color={colors.textSecondary} style={{ marginLeft: 8 }}>
-                  System controlled based on sun position
-                </Typo>
-              </View>
-            </View>
+{/* Solar Prediction Card */}
+<View style={styles.card}>
+  <View style={styles.cardHeader}>
+    <Typo size={16} fontWeight="600">Servo Motor Status</Typo>
+    <Icons.Sun size={24} color={colors.primary} weight="fill" />
+  </View>
+
+  {/* Hardcoded Prediction Value */}
+  <Typo size={36} fontWeight="700" style={styles.cardValue}>
+    5.8 kWh
+  </Typo>
+
+</View>
+
+{/* Solar Prediction Card */}
+<View style={styles.card}>
+  <View style={styles.cardHeader}>
+    <Typo size={16} fontWeight="600">Solar Mirror Angle</Typo>
+    <Icons.Sun size={24} color={colors.primary} weight="fill" />
+  </View>
+
+  {/* Hardcoded Prediction Value */}
+  <Typo size={36} fontWeight="700" style={styles.cardValue}>
+    45°
+  </Typo>
+
+</View>
           </View>
 
         </View>
@@ -366,6 +299,30 @@ const styles = StyleSheet.create({
     right: 20,
     top: 10,
     alignItems: "center",
+  },
+  card: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    padding: spacingX._20,
+    borderRadius: 24,
+    gap: 4,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  cardValue: {
+    marginTop: 4,
+  },
+  cardSubValue: {
+    marginBottom: 12,
+  },
+  cardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
   },
   angleLineContainer: {
     position: "absolute",
