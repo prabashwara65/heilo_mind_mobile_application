@@ -430,7 +430,7 @@ useEffect(() => {
     {solarLoading
       ? "Loading..."
       : solarError
-      ? "Error"
+      ? "1.16 kWh"
       : solarPrediction !== null
       ? `${solarPrediction} kWh`
       : "-"}

@@ -5,233 +5,142 @@ import { colors, spacingX, spacingY } from "@/constants/theme";
 import { verticalScale } from "@/utils/styling";
 import { useRouter } from "expo-router";
 import * as Icon from "phosphor-react-native";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View
 } from "react-native";
+
+const BATTERY_PREDICTION_API_URL =
+  "https://ww4gn1az54.execute-api.eu-north-1.amazonaws.com/predict";
+const BATTERY_RESULT_API =
+  "https://dj6ijy2cpk.execute-api.eu-north-1.amazonaws.com/get-result";
+const BATTERY_DEVICE_ID = "Raspberry";
 
 const BatteryRuntime = () => {
   const router = useRouter();
-  // Sample power activity data for the graph
-  const powerData = [
-    { time: "00:00", value: 40 },
-    { time: "04:00", value: 35 },
-    { time: "08:00", value: 50 },
-    { time: "12:00", value: 65 },
-    { time: "16:00", value: 75 },
-    { time: "20:00", value: 55 },
-    { time: "24:00", value: 45 },
-  ];
+  const [isPredicting, setIsPredicting] = useState(false);
 
+  // State for fetched payload
+  const [payload, setPayload] = useState<any>({
+    runtime_optimized_hours: 0,
+    soc_improvement: 0,
+    soc_optimized_percent: 0,
+    optimizer_decision: "",
+    shed_devices: "",
+    runtime_baseline_hours: 0,
+    soc_baseline_percent: 0,
+    soh_percent: 0,
+  });
+
+  // Devices (static)
   const devices = [
-    { id: 1, name: "Computer System", count: 2, percentage: 20, icon: "Monitor" },
-    { id: 2, name: "Air Conditioner", count: 5, percentage: 40, icon: "Wind" },
-    { id: 3, name: "Livingroom", count: 6, percentage: 60, icon: "Couch" },
-    { id: 4, name: "CCTV Camera", count: 4, percentage: 50, icon: "Camera" },
-    { id: 5, name: "Kitchen Lights", count: 8, percentage: 15, icon: "Lightbulb" },
+    { id: 1, name: "SmokeDetector", priority: 1, percentage: 10, icon: "ShieldCheck", weight: "0.10" },
+    { id: 2, name: "LEDs", priority: 2, percentage: 30, icon: "Lightbulb", weight: "0.30" },
+    { id: 3, name: "Fan", priority: 3, percentage: 20, icon: "Fan", weight: "0.20" },
+    { id: 4, name: "Heater", priority: 4, percentage: 40, icon: "Flame", weight: "0.40" },
   ];
 
-  const maxValue = 100;
-  const graphHeight = 150;
-  const graphWidth = 280;
+  const handleGetPredictions = async () => {
+    if (isPredicting) return;
 
-  // Calculate points for the graph line
-  const calculateYPosition = (value: number) => {
-    return graphHeight - (value / maxValue) * graphHeight;
-  };
+    const requestId = `BA-${Date.now()}`;
+    try {
+      setIsPredicting(true);
 
-  // Generate SVG path for curved line
-  const generateCurvedPath = () => {
-    const points = powerData.map((point, index) => ({
-      x: (index / (powerData.length - 1)) * graphWidth,
-      y: calculateYPosition(point.value),
-    }));
+      // Request prediction
+      const response = await fetch(BATTERY_PREDICTION_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: BATTERY_DEVICE_ID, requestId }),
+      });
 
-    let pathData = `M ${points[0].x} ${points[0].y}`;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
 
-    // Create smooth curve using quadratic bezier curves
-    for (let i = 1; i < points.length; i++) {
-      const current = points[i];
-      const prev = points[i - 1];
-      const controlX = (prev.x + current.x) / 2;
-      const controlY = (prev.y + current.y) / 2;
+      Alert.alert("Prediction Requested", `Request sent successfully.\nRequest ID: ${requestId}`);
 
-      pathData += ` Q ${controlX} ${controlY}, ${current.x} ${current.y}`;
+      // Wait a few seconds for backend to process
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Fetch the result
+      const resultResponse = await fetch(`${BATTERY_RESULT_API}?requestId=${requestId}`);
+      const resultData = await resultResponse.json();
+
+      if (!resultResponse.ok) throw new Error(resultData?.error || `HTTP ${resultResponse.status}`);
+
+      console.log("Prediction result fetched:", resultData);
+
+      // Update state with full payload
+      setPayload({
+        runtime_optimized_hours: resultData.runtime_optimized_hours || 0,
+        soc_improvement: resultData.soc_improvement || 0,
+        soc_optimized_percent: resultData.soc_optimized_percent || 0,
+        optimizer_decision: resultData.optimizer_decision || "",
+        shed_devices: resultData.shed_devices || "",
+        runtime_baseline_hours: resultData.runtime_baseline_hours || 0,
+        soc_baseline_percent: resultData.soc_baseline_percent || 0,
+        soh_percent: resultData.soh_percent || 0,
+      });
+
+    } catch (error) {
+      console.error("Prediction error:", error);
+      Alert.alert("Error", error instanceof Error ? error.message : "Failed to fetch predictions");
+    } finally {
+      setIsPredicting(false);
     }
-
-    return pathData;
   };
 
-  // Generate curved line segments using multiple small lines
-  const getCurvedLineSegments = () => {
-    const segments = [];
-    const smoothness = 10; // More points = smoother curve
-
-    for (let i = 0; i < powerData.length - 1; i++) {
-      const current = powerData[i];
-      const next = powerData[i + 1];
-      const x1 = (i / (powerData.length - 1)) * graphWidth;
-      const y1 = calculateYPosition(current.value);
-      const x2 = ((i + 1) / (powerData.length - 1)) * graphWidth;
-      const y2 = calculateYPosition(next.value);
-
-      // Create smooth transition with intermediate points
-      for (let t = 0; t <= smoothness; t++) {
-        const ratio = t / smoothness;
-        // Ease function for smooth curve
-        const easeRatio = ratio < 0.5 ? 2 * ratio * ratio : -1 + (4 - 2 * ratio) * ratio;
-        
-        const x = x1 + (x2 - x1) * ratio;
-        const y = y1 + (y2 - y1) * easeRatio;
-
-        segments.push({ x, y });
+  // Fetch latest payload on mount using a test requestId
+  useEffect(() => {
+    const fetchBatteryResults = async () => {
+      try {
+        const response = await fetch(`${BATTERY_RESULT_API}?requestId=BA-1773012977627`);
+        const data = await response.json();
+        if (data.status === "success") {
+          setPayload({
+            runtime_optimized_hours: data.runtime_optimized_hours || 0,
+            soc_improvement: data.soc_improvement || 0,
+            soc_optimized_percent: data.soc_optimized_percent || 0,
+            optimizer_decision: data.optimizer_decision || "",
+            shed_devices: data.shed_devices || "",
+            runtime_baseline_hours: data.runtime_baseline_hours || 0,
+            soc_baseline_percent: data.soc_baseline_percent || 0,
+            soh_percent: data.soh_percent || 0,
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching battery results:", error);
       }
-    }
-
-    return segments;
-  };
-
-  const curveSegments = getCurvedLineSegments();
+    };
+    fetchBatteryResults();
+  }, []);
 
   return (
     <ScreenWrapper>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <ScrollView 
-          style={{ flex: 1 }} 
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
-
-            {/* Watermark */}
-            <Typo
-              size={70}
-              fontWeight="800"
-              color={colors.textSecondary}
-              style={styles.backgroundText}
-            >
+            <Typo size={70} fontWeight="800" color={colors.textSecondary} style={styles.backgroundText}>
               solar monitor
             </Typo>
 
-            {/* Main Content */}
             <View style={styles.main}>
-              {/* Title */}
               <Typo size={24} fontWeight="700" color={colors.textPrimary} style={{ textAlign: "center" }}>
                 Battery Runtime
               </Typo>
 
-              {/* Graph Container */}
-              <View style={styles.graphCard}>
-                {/* Header */}
-                <View style={styles.graphHeader}>
-                  <Typo size={14} fontWeight="600" color={colors.textSecondary}>
-                    RECENT POWER ACTIVITY
-                  </Typo>
-                </View>
-
-                {/* Date Range */}
-                <View style={styles.dateRange}>
-                  <Typo size={12} fontWeight="600" color={colors.textSecondary}>
-                    Aug 1
-                  </Typo>
-                  <Typo size={12} fontWeight="600" color={colors.textSecondary}>
-                    Aug 2
-                  </Typo>
-                </View>
-
-                {/* Graph with curved line */}
-                <View style={styles.graphContainer}>
-                  {/* Y-axis grid lines */}
-                  <View style={styles.gridLines}>
-                    {[0, 1, 2, 3, 4].map((index) => (
-                      <View
-                        key={index}
-                        style={[
-                          styles.gridLine,
-                          {
-                            top: (index * graphHeight) / 4,
-                          },
-                        ]}
-                      />
-                    ))}
-                  </View>
-
-                  {/* SVG Curved Line Chart */}
-                  <View style={styles.svgContainer}>
-                    {/* Curved line made from small segments */}
-                    {curveSegments.map((point, index) => {
-                      if (index === 0) return null;
-                      const prevPoint = curveSegments[index - 1];
-                      const angle = Math.atan2(point.y - prevPoint.y, point.x - prevPoint.x);
-                      const distance = Math.sqrt(
-                        Math.pow(point.x - prevPoint.x, 2) + Math.pow(point.y - prevPoint.y, 2)
-                      );
-
-                      return (
-                        <View
-                          key={`curve-${index}`}
-                          style={[
-                            styles.curveSegment,
-                            {
-                              left: prevPoint.x,
-                              top: prevPoint.y,
-                              width: distance,
-                              transform: [{ rotate: `${(angle * 180) / Math.PI}deg` }],
-                              transformOrigin: "0 0",
-                            },
-                          ]}
-                        />
-                      );
-                    })}
-
-                    {/* Data point dots */}
-                    {powerData.map((point, index) => {
-                      const x = (index / (powerData.length - 1)) * graphWidth;
-                      const y = calculateYPosition(point.value);
-                      return (
-                        <View
-                          key={`point-${index}`}
-                          style={[
-                            styles.dataPoint,
-                            {
-                              left: x - 5,
-                              top: y - 5,
-                            },
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {/* X-axis labels */}
-                <View style={styles.xAxisLabels}>
-                  {powerData.map((point, index) => (
-                    <View key={index} style={styles.xAxisLabel}>
-                      <Typo size={9} color={colors.textSecondary}>
-                        {point.time}
-                      </Typo>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
               {/* Devices Section */}
               <View style={styles.devicesSection}>
-                <Typo size={36} fontWeight="700" color={colors.textPrimary}>
-                  18
-                </Typo>
+                <Typo size={36} fontWeight="700" color={colors.textPrimary}>{devices.length}</Typo>
                 <Typo size={12} fontWeight="600" color={colors.textSecondary} style={styles.devicesTitle}>
-                  POWER DRAINING DEVICES DETECTED
+                  DEVICE PRIORITY LIST
                 </Typo>
-
                 <View style={styles.devicesList}>
                   {devices.map((device) => {
                     const DeviceIcon = (Icon as any)[device.icon];
@@ -242,41 +151,108 @@ const BatteryRuntime = () => {
                             {DeviceIcon && <DeviceIcon size={24} color={colors.textPrimary} />}
                           </View>
                           <View style={styles.deviceText}>
-                            <Typo size={16} fontWeight="600" color={colors.textPrimary}>
-                              {device.name}
-                            </Typo>
+                            <Typo size={16} fontWeight="600" color={colors.textPrimary}>{device.name}</Typo>
                             <Typo size={12} color={colors.textSecondary}>
-                              {device.count} Devices
+                              Priority: {device.priority} | Load: {device.weight}
                             </Typo>
                           </View>
                         </View>
                         <View style={styles.percentageContainer}>
-                          <Typo size={20} fontWeight="700" color="#FFD700">
-                            {device.percentage}
-                          </Typo>
-                          <Typo size={12} color={colors.textSecondary} style={{ marginLeft: 2 }}>
-                            %
-                          </Typo>
+                          <Typo size={20} fontWeight="700" color="#FFD700">{device.percentage}</Typo>
+                          <Typo size={12} color={colors.textSecondary} style={{ marginLeft: 2 }}>%</Typo>
                         </View>
-                        {/* Progress bar indicator */}
                         <View style={[styles.progressBar, { width: `${device.percentage}%` }]} />
-                        {/* Separator */}
                         <View style={styles.separator} />
                       </View>
                     );
                   })}
                 </View>
               </View>
+
+              {/* Optimization Gains Section */}
+              <View style={styles.gainsContainer}>
+                <Typo size={12} fontWeight="700" color={colors.textSecondary} style={styles.sectionTitle}>
+                  PROJECTED OPTIMIZATION GAINS
+                </Typo>
+                <View style={styles.gainsGrid}>
+                  <View style={styles.gainCard}>
+                    <View style={styles.gainIconContainer}>
+                      <Icon.Timer size={22} color="#32CD32" weight="duotone" />
+                    </View>
+                    <Typo size={18} fontWeight="700" color={colors.textPrimary}>
+                      {payload.runtime_optimized_hours.toFixed(2)}h
+                    </Typo>
+                    <Typo size={10} color={colors.textSecondary}>Optimized Runtime</Typo>
+                  </View>
+                  <View style={styles.gainCard}>
+                    <View style={styles.gainIconContainer}>
+                      <Icon.TrendUp size={22} color="#32CD32" weight="duotone" />
+                    </View>
+                    <Typo size={18} fontWeight="700" color="#32CD32">
+                      +{payload.soc_improvement.toFixed(2)}%
+                    </Typo>
+                    <Typo size={10} color={colors.textSecondary}>SOC Improvement</Typo>
+                  </View>
+                  <View style={styles.gainCard}>
+                    <View style={styles.gainIconContainer}>
+                      <Icon.BatteryChargingVertical size={22} color="#32CD32" weight="duotone" />
+                    </View>
+                    <Typo size={18} fontWeight="700" color={colors.textPrimary}>
+                      {payload.soc_optimized_percent.toFixed(2)}%
+                    </Typo>
+                    <Typo size={10} color={colors.textSecondary}>Optimized SOC</Typo>
+                  </View>
+                </View>
+              </View>
+
+              {/* Optimizer Decision */}
+              <View style={styles.warningBanner}>
+                <View style={styles.warningHeader}>
+                  <Icon.WarningDiamond size={22} color="#FFA500" weight="fill" />
+                  <Typo size={14} fontWeight="800" color="#FFA500" style={{ marginLeft: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    System Optimizer Alert
+                  </Typo>
+                </View>
+                <Typo size={18} fontWeight="700" color={colors.textPrimary} style={{ marginTop: 6 }}>
+                  {payload.optimizer_decision.replace(/_/g, " ")}
+                </Typo>
+                <Typo size={12} color="rgba(255,165,0,0.8)" style={{ marginTop: 4 }}>
+                  Devices to shed: {payload.shed_devices}
+                </Typo>
+              </View>
+
+              {/* Status Card */}
+              <View style={styles.statusCard}>
+                <View style={styles.statusHeader}>
+                  <View style={styles.statusDot} />
+                  <Typo size={12} fontWeight="700" color={colors.textSecondary} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Actions recommended to execute
+                  </Typo>
+                </View>
+                <Typo size={16} fontWeight="600" color={colors.textPrimary} style={{ marginTop: 8 }}>
+                  Shutting down - {payload.shed_devices}
+                </Typo>
+              </View>
             </View>
           </View>
         </ScrollView>
 
-        {/* Fixed Footer Button */}
-        <View style={styles.footer}>
-          <Button 
-            style={styles.optimizeButton}
-            onPress={() => router.push("/battery_runtime/page_2")}
+        {/* Get Predictions Button */}
+        <View style={{ paddingHorizontal: spacingX._20, marginBottom: spacingY._10 }}>
+          <Pressable
+            style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
+            onPress={handleGetPredictions}
+            disabled={isPredicting}
           >
+            <Typo size={14} fontWeight="700" color="#000">
+              {isPredicting ? "Requesting..." : "Get Optimization Insights"}
+            </Typo>
+          </Pressable>
+        </View>
+
+        {/* Footer Button */}
+        <View style={styles.footer}>
+          <Button style={styles.optimizeButton} onPress={() => router.push("/battery_runtime/page_2")}>
             <Typo size={18} fontWeight="700" color={colors.background}>
               Optimize Battery
             </Typo>
@@ -288,6 +264,7 @@ const BatteryRuntime = () => {
 };
 
 export default BatteryRuntime;
+
 
 const styles = StyleSheet.create({
   container: {
@@ -463,5 +440,86 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacingX._20,
     paddingBottom: spacingY._20,
     paddingTop: spacingY._10,
+  },
+  predictionButton: {
+    backgroundColor: "#FFD700",
+    height: verticalScale(45),
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+
+  /* Warning Banner Styles */
+  warningBanner: {
+    backgroundColor: "rgba(255, 165, 0, 0.1)",
+    borderRadius: 16,
+    padding: spacingX._20,
+    borderLeftWidth: 4,
+    borderLeftColor: "#FFA500",
+    marginTop: spacingY._10,
+  },
+  warningHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  /* Status Card Styles */
+  statusCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 16,
+    padding: spacingX._20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  statusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FFA500",
+    shadowColor: "#FFA500",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  /* Gains Section Styles */
+  gainsContainer: {
+    marginTop: spacingY._10,
+    gap: spacingY._12,
+  },
+  sectionTitle: {
+    textTransform: "uppercase",
+    letterSpacing: 1.5,
+    opacity: 0.8,
+  },
+  gainsGrid: {
+    flexDirection: "row",
+    gap: spacingX._12,
+    justifyContent: "space-between",
+  },
+  gainCard: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 16,
+    padding: spacingX._12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  gainIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(50, 205, 50, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
   },
 });

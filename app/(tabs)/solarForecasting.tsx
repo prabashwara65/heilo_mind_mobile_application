@@ -94,31 +94,31 @@ const SolarForecasting = () => {
     return payload;
   };
 
-  const fetchSensorData = async () => {
-  try {
-    const response = await fetch(
-      process.env.EXPO_PUBLIC_SENSOR_API_URL as string
-    );
+//   const fetchSensorData = async () => {
+//   try {
+//     const response = await fetch(
+//       process.env.EXPO_PUBLIC_SENSOR_API_URL as string
+//     );
 
-    const data = await response.json();
+//     const data = await response.json();
 
-    console.log("Sensor API response:", data);
+//     console.log("Sensor API response:", data);
 
-    setSensorData(data || []);
-  } catch (error) {
-    console.log("Sensor fetch error:", error);
-  }
-};
+//     setSensorData(data || []);
+//   } catch (error) {
+//     console.log("Sensor fetch error:", error);
+//   }
+// };
 
-useEffect(() => {
-  fetchSensorData();
+// useEffect(() => {
+//   fetchSensorData();
 
-  const interval = setInterval(() => {
-    fetchSensorData();
-  }, 10000); // every 10 seconds
+//   const interval = setInterval(() => {
+//     fetchSensorData();
+//   }, 10000); // every 10 seconds
 
-  return () => clearInterval(interval);
-}, []);
+//   return () => clearInterval(interval);
+// }, []);
 
 
 
@@ -280,7 +280,7 @@ const cardWidth = width * 0.75;
   setPredictions((prev) =>
     prev.map((item) =>
       item.label === "Today"
-        ? { ...item, value: predictionValue }
+        ? { ...item, value: parseFloat(Number(predictionValue).toFixed(2))}
         : item
     )
   );

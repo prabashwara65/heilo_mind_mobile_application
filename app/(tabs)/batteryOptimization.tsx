@@ -4,7 +4,7 @@ import { colors, spacingX, spacingY } from "@/constants/theme";
 import { verticalScale } from "@/utils/styling";
 import { useRouter } from "expo-router";
 import * as Icon from "phosphor-react-native";
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,21 +12,23 @@ import {
   Pressable,
   StyleSheet,
   View,
-  ActivityIndicator,
-  ScrollView,
 } from "react-native";
 
 const BATTERY_PREDICTION_API_URL =
-  process.env.EXPO_PUBLIC_BATTERY_PREDICTION_API_URL as string;
-const BATTERY_RESULT_API_URL =
-  process.env.EXPO_PUBLIC_BATTERY_RESULT_API_URL as string;
-const BATTERY_DEVICE_ID = process.env.EXPO_PUBLIC_SOLAR_DEVICE_ID as string;
+  "https://ww4gn1az54.execute-api.eu-north-1.amazonaws.com/predict";
+
+const BATTERY_RESULT_API =
+  "https://dj6ijy2cpk.execute-api.eu-north-1.amazonaws.com/get-result";
+
+const BATTERY_DEVICE_ID = "Raspberry";
 
 const BatteryOptimization = () => {
-  const [batteryLevel] = useState(12);
+
+  const [batteryLevel, setBatteryLevel] = useState(0);
+  const [led_count, setLedCount] = useState(0);
+  const [runtimeHours, setRuntimeHours] = useState(0);
+  const [batteryHealth, setBatteryHealth] = useState(0);
   const [isPredicting, setIsPredicting] = useState(false);
-  const [predictedRuntime, setPredictedRuntime] = useState<string | null>(null);
-  const [ledCount, setLedCount] = useState(1);
 
   const router = useRouter();
 
@@ -34,114 +36,29 @@ const BatteryOptimization = () => {
     router.push("/battery_runtime/page");
   };
 
-  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  const normalizeApiPayload = (payload: any) => {
-    if (payload && typeof payload.body === "string") {
-      try {
-        return JSON.parse(payload.body);
-      } catch {
-        return payload;
-      }
-    }
-    return payload;
-  };
-
-  const isResultPending = (status: number, payload: any) => {
-    const message = String(
-      payload?.error || payload?.message || payload?.details || ""
-    ).toLowerCase();
-
-    return (
-      status === 404 ||
-      status === 202 ||
-      status === 429 ||
-      message.includes("not ready") ||
-      message.includes("not found") ||
-      message.includes("pending")
-    );
-  };
-
-  const extractBatteryResultValue = (payload: any) => {
-    return (
-      payload?.prediction ??
-      payload?.data?.prediction ??
-      payload?.result?.prediction ??
-      payload?.runtime_optimized_hours ??
-      payload?.data?.runtime_optimized_hours ??
-      payload?.result?.runtime_optimized_hours
-    );
-  };
-
-  const fetchBatteryResult = async (requestId: string) => {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt < 10; attempt++) {
-      try {
-        const url = `${BATTERY_RESULT_API_URL}?requestId=${encodeURIComponent(
-          requestId
-        )}`;
-        console.log(`Attempt ${attempt + 1} GET:`, url);
-
-        const response = await fetch(url);
-        const rawResultData = await response.json().catch(() => ({}));
-        const resultData = normalizeApiPayload(rawResultData);
-
-        if (isResultPending(response.status, resultData)) {
-          console.log(`Result not ready yet (${response.status}), retrying...`);
-          throw new Error("Result not ready");
-        }
-
-        if (!response.ok) {
-          const errorMessage =
-            resultData?.error || resultData?.details || `HTTP ${response.status}`;
-          throw new Error(errorMessage);
-        }
-
-        const hasPrediction = extractBatteryResultValue(resultData) !== undefined;
-        const isSuccessfulPayload =
-          String(
-            resultData?.status ??
-              resultData?.data?.status ??
-              resultData?.result?.status ??
-              ""
-          ).toLowerCase() === "success";
-
-        if (hasPrediction || isSuccessfulPayload) {
-          return resultData;
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error("Failed to fetch result");
-      }
-
-      await wait(2000);
-    }
-
-    if (lastError) throw lastError;
-    throw new Error("Battery prediction not available after multiple attempts.");
-  };
-
   const handleGetPredictions = async () => {
+
     if (isPredicting) return;
 
     const requestId = `BA-${Date.now()}`;
 
     try {
+
       setIsPredicting(true);
-      setPredictedRuntime(null);
 
       const response = await fetch(BATTERY_PREDICTION_API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           deviceId: BATTERY_DEVICE_ID,
           requestId,
-          led_count: ledCount,
+          led_count: led_count, // LED logic added
         }),
       });
 
-      const rawData = await response.json().catch(() => ({}));
-      const data = normalizeApiPayload(rawData);
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         const errorMessage =
@@ -149,32 +66,43 @@ const BatteryOptimization = () => {
         throw new Error(errorMessage);
       }
 
-      console.log("Battery prediction request sent:", data);
+      Alert.alert(
+        "Prediction Requested",
+        `Request sent successfully.\nRequest ID: ${requestId}`
+      );
 
-      const effectiveRequestId =
-        data?.requestId || data?.requestid || data?.data?.requestId || requestId;
-      const resultData = await fetchBatteryResult(effectiveRequestId);
-      console.log("Battery prediction result fetched:", resultData);
+      console.log("Battery prediction request response:", data);
 
-      const predictionValue = extractBatteryResultValue(resultData);
+      // wait backend processing
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      const predictionText =
-        typeof predictionValue === "number"
-          ? `${predictionValue.toFixed(2)}h`
-          : typeof predictionValue === "object"
-          ? JSON.stringify(predictionValue)
-          : String(predictionValue ?? "N/A");
+      const resultResponse = await fetch(
+        `${BATTERY_RESULT_API}?requestId=${requestId}`
+      );
 
-      setPredictedRuntime(predictionText);
+      const resultData = await resultResponse.json();
 
-      setLedCount((prev) => (prev === 1 ? 2 : 1));
+      console.log("Prediction result payload:", resultData);
+
+      // update states from API
+      setLedCount(resultData.led_count || 0);
+      setBatteryLevel(Math.round(resultData.soc_baseline_percent || 0));
+      setRuntimeHours(resultData.runtime_baseline_hours || 0);
+      setBatteryHealth(Math.round(resultData.soh_percent || 0));
+
     } catch (error) {
+
       const message =
-        error instanceof Error ? error.message : "Failed to get prediction";
+        error instanceof Error ? error.message : "Failed to trigger prediction";
+
       Alert.alert("Request Failed", message);
-      console.log("Battery prediction error:", error);
+
+      console.log("Battery prediction request error:", error);
+
     } finally {
+
       setIsPredicting(false);
+
     }
   };
 
@@ -184,132 +112,171 @@ const BatteryOptimization = () => {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-          <View style={styles.container}>
-            {/* Watermark */}
+
+        <View style={styles.container}>
+
+          <Typo
+            size={70}
+            fontWeight="800"
+            color={colors.textSecondary}
+            style={styles.backgroundText}
+          >
+            solar monitor
+          </Typo>
+
+          <View style={styles.main}>
+
             <Typo
-              size={70}
-              fontWeight="800"
-              color={colors.textSecondary}
-              style={styles.backgroundText}
+              size={28}
+              fontWeight="700"
+              color={colors.textPrimary}
+              style={{ textAlign: "center", marginBottom: spacingY._10 }}
             >
-              solar monitor
+              Battery Runtime
             </Typo>
 
-            {/* Main Content */}
-            <View style={styles.main}>
-              {/* Title */}
-              <Typo
-                size={28}
-                fontWeight="700"
-                color={colors.textPrimary}
-                style={{ textAlign: "center", marginBottom: spacingY._10 }}
-              >
-                Battery Runtime
-              </Typo>
+            {/* Battery Visualization */}
+            <View
+              style={[
+                styles.batteryContainer,
+                { marginTop: -verticalScale(40) },
+              ]}
+            >
 
-              {/* Battery Visualization */}
-              <View style={styles.batteryContainer}>
-                <View style={styles.batteryFrame}>
-                  <View style={styles.batteryCap} />
-                  <View style={styles.batteryBody}>
-                    <View style={styles.topIconContainer}>
-                      <Icon.Lightning size={40} color="#90EE90" weight="fill" />
-                    </View>
-                    <View style={[styles.batteryFill, { height: `${batteryLevel}%` }]}>
-                      <View style={styles.innerGlowBottom} />
-                      <View style={styles.innerGlowMiddle} />
-                      <View style={styles.innerGlowTop} />
-                    </View>
-                    <View style={styles.percentageContainer}>
+              <View style={styles.batteryFrame}>
+
+                <View style={styles.batteryCap} />
+
+                <View style={styles.batteryBody}>
+
+                  <View style={styles.topIconContainer}>
+                    <Icon.Lightning size={40} color="#90EE90" weight="fill" />
+                  </View>
+
+                  <View
+                    style={[
+                      styles.batteryFill,
+                      { height: `${batteryLevel}%` },
+                    ]}
+                  >
+                    <View style={styles.innerGlowBottom} />
+                    <View style={styles.innerGlowMiddle} />
+                    <View style={styles.innerGlowTop} />
+                  </View>
+
+                  <View style={styles.percentageContainer}>
+
+                    <Typo
+                      size={18}
+                      fontWeight="600"
+                      color="rgba(255,255,255,0.8)"
+                      style={{ marginBottom: 4, textAlign: "center" }}
+                    >
+                      State of Charge
+                    </Typo>
+
+                    <View style={{ flexDirection: "row", alignItems: "baseline" }}>
                       <Typo size={48} fontWeight="700" color="#fff">
                         {batteryLevel}
                       </Typo>
-                      <Typo size={20} fontWeight="600" color="#fff" style={{ marginLeft: 4 }}>
+                      <Typo
+                        size={24}
+                        fontWeight="600"
+                        color="#fff"
+                        style={{ marginLeft: 4 }}
+                      >
                         %
                       </Typo>
                     </View>
-                  </View>
-                </View>
-              </View>
 
-              {/* Widgets */}
-              <View style={styles.widgetsContainer}>
-                <View style={styles.widgetRow}>
-                  <View style={styles.widgetLarge}>
-                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                      REMAINING BATTERY LIFE
-                    </Typo>
-                    <Typo size={32} fontWeight="700" color="#000">
-                      {predictedRuntime ? predictedRuntime : "5.13h"}
-                    </Typo>
                   </View>
-                  <Pressable style={styles.widgetSmall} onPress={handlePowerDrainingPress}>
-                    <View style={styles.widgetSmallContent}>
-                      <View>
-                        <Typo size={28} fontWeight="700" color="#000">
-                          18
-                        </Typo>
-                        <Typo size={11} fontWeight="600" color="#000" style={{ marginTop: 4 }}>
-                          POWER DRAINING
-                        </Typo>
-                        <Typo size={10} color="#000">
-                          Devices
-                        </Typo>
-                      </View>
-                      <Icon.CaretRight size={24} color="#000" weight="bold" />
-                    </View>
-                  </Pressable>
+
                 </View>
 
-                <View style={styles.widgetRow}>
-                  <View style={styles.widgetSmall}>
-                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                      TIME TO FULLY CHARGE
-                    </Typo>
-                    <Typo size={28} fontWeight="700" color="#000">
-                      2h
-                    </Typo>
-                  </View>
-
-                  <View style={styles.widgetLarge}>
-                    <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
-                      State of Battery Health
-                    </Typo>
-                    <Typo size={32} fontWeight="700" color="#000">
-                      89%
-                    </Typo>
-                  </View>
-                </View>
               </View>
 
-              {/* LED Count */}
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacingY._5 }}>
-                <Typo size={14} fontWeight="600" color={colors.textSecondary}>
-                  LEDs ON:
-                </Typo>
-                <Typo size={18} fontWeight="700" color="#7CFC00" style={{ marginLeft: 8 }}>
-                  {ledCount}
-                </Typo>
-              </View>
-
-              {/* Prediction Button */}
-              <Pressable
-                style={[styles.predictionButton, isPredicting && styles.buttonDisabled]}
-                onPress={handleGetPredictions}
-                disabled={isPredicting}
-              >
-                {isPredicting ? (
-                  <ActivityIndicator size="small" color="#000" />
-                ) : (
-                  <Typo size={14} fontWeight="700" color="#000">
-                    Get Predictions
-                  </Typo>
-                )}
-              </Pressable>
             </View>
+
+            {/* Devices Working */}
+            <Pressable
+              onPress={() => setLedCount((prev) => (prev === 2 ? 1 : 2))}
+              style={{ marginTop: -verticalScale(10) }}
+            >
+              <Typo size={16} fontWeight="600" color={colors.textPrimary}>
+                {led_count > 0
+                  ? `${led_count} device${led_count > 1 ? "s" : ""} ${led_count > 1 ? "are" : "is"
+                  } currently working`
+                  : "No devices connected"}
+              </Typo>
+            </Pressable>
+
+            {/* Widgets */}
+            <View style={styles.widgetsContainer}>
+
+              <View style={styles.widgetRow}>
+
+                <View style={styles.widgetLarge}>
+                  <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
+                    REMAINING BATTERY LIFE
+                  </Typo>
+
+                  <Typo size={32} fontWeight="700" color="#000">
+                    {runtimeHours.toFixed(2)}h
+                  </Typo>
+                </View>
+
+                <View style={styles.widgetLarge}>
+                  <Typo size={12} fontWeight="600" color="#000" style={{ marginBottom: 8 }}>
+                    State of Battery Health
+                  </Typo>
+
+                  <Typo size={32} fontWeight="700" color="#000">
+                    {batteryHealth}%
+                  </Typo>
+                </View>
+
+              </View>
+
+              <View style={styles.widgetRow}>
+
+                <Pressable
+                  style={[styles.widgetSmall, { flex: 1 }]}
+                  onPress={handlePowerDrainingPress}
+                >
+                  <View style={styles.widgetSmallContent}>
+
+                    <View>
+                      <Typo size={13} fontWeight="800" color="#000">
+                        Optimize battery for maximum battery life
+                      </Typo>
+                    </View>
+
+                    <Icon.CaretRight size={24} color="#000" weight="bold" />
+
+                  </View>
+                </Pressable>
+
+              </View>
+
+            </View>
+
+            <Pressable
+              style={[
+                styles.predictionButton,
+                isPredicting && styles.buttonDisabled,
+              ]}
+              onPress={handleGetPredictions}
+              disabled={isPredicting}
+            >
+              <Typo size={14} fontWeight="700" color="#000">
+                {isPredicting ? "Requesting..." : "Get Predictions"}
+              </Typo>
+            </Pressable>
+
           </View>
-        </ScrollView>
+
+        </View>
+
       </KeyboardAvoidingView>
     </ScreenWrapper>
   );
@@ -317,8 +284,11 @@ const BatteryOptimization = () => {
 
 export default BatteryOptimization;
 
+/* Styles remain unchanged */
+
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: "space-between" },
+
   backgroundText: {
     position: "absolute",
     top: verticalScale(400),
@@ -327,47 +297,56 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 4,
   },
+
   main: {
-    flexGrow: 1,
+    flex: 1,
     paddingHorizontal: spacingX._20,
     justifyContent: "center",
     alignItems: "center",
     gap: spacingY._30,
   },
-  batteryContainer: { position: "relative", alignItems: "center", justifyContent: "center", width: 200, height: 320 },
+
+  batteryContainer: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 200,
+    height: 320,
+  },
+
   batteryFrame: { alignItems: "center", zIndex: 10 },
+
   batteryCap: {
     width: 60,
     height: 15,
-    backgroundColor: "transparent",
     borderWidth: 3,
     borderColor: "#7CFC00",
     borderTopLeftRadius: 10,
     borderTopRightRadius: 10,
     borderBottomWidth: 0,
     marginBottom: -2,
-    shadowColor: "#7CFC00",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 5,
   },
+
   batteryBody: {
     width: 160,
     height: 280,
-    backgroundColor: "rgba(20, 25, 20, 0.95)",
+    backgroundColor: "rgba(20,25,20,0.95)",
     borderWidth: 3,
     borderColor: "#7CFC00",
     borderRadius: 35,
     overflow: "hidden",
     justifyContent: "flex-end",
-    shadowColor: "#7CFC00",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 8,
   },
-  topIconContainer: { position: "absolute", top: 20, left: 0, right: 0, alignItems: "center", zIndex: 20 },
+
+  topIconContainer: {
+    position: "absolute",
+    top: 20,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 20,
+  },
+
   batteryFill: {
     position: "absolute",
     bottom: 0,
@@ -375,23 +354,54 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: "#32CD32",
     opacity: 0.8,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    shadowColor: "#32CD32",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 15,
-    overflow: "hidden",
   },
+
   innerGlowBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: "40%", backgroundColor: "#00ff00", opacity: 0.4 },
   innerGlowMiddle: { position: "absolute", bottom: 0, left: 0, right: 0, height: "60%", backgroundColor: "#32CD32", opacity: 0.3 },
   innerGlowTop: { position: "absolute", bottom: 0, left: 0, right: 0, height: "80%", backgroundColor: "#7CFC00", opacity: 0.2 },
-  percentageContainer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, flexDirection: "row", justifyContent: "center", alignItems: "center", zIndex: 10 },
+
+  percentageContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
   widgetsContainer: { width: "100%", gap: spacingY._15 },
+
   widgetRow: { flexDirection: "row", gap: spacingX._15, width: "100%" },
-  widgetLarge: { flex: 1.5, backgroundColor: "#7CFC00", borderRadius: 16, padding: spacingX._15, justifyContent: "flex-start", shadowColor: "#7CFC00", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
-  widgetSmall: { flex: 1, backgroundColor: colors.surface, borderRadius: 16, padding: spacingX._15, justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 },
-  widgetSmallContent: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  predictionButton: { marginTop: spacingY._5, width: "100%", backgroundColor: "#7CFC00", borderRadius: 14, paddingVertical: spacingY._12, alignItems: "center", justifyContent: "center" },
+
+  widgetLarge: {
+    flex: 1.5,
+    backgroundColor: "#7CFC00",
+    borderRadius: 16,
+    padding: spacingX._15,
+  },
+
+  widgetSmall: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: spacingX._15,
+  },
+
+  widgetSmallContent: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  predictionButton: {
+    marginTop: spacingY._5,
+    width: "100%",
+    backgroundColor: "#7CFC00",
+    borderRadius: 14,
+    paddingVertical: spacingY._12,
+    alignItems: "center",
+  },
+
   buttonDisabled: { opacity: 0.65 },
 });
