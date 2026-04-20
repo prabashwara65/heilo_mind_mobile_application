@@ -9,10 +9,23 @@ import { colors, radius } from '@/constants/theme';
 const BackButton = ({
     style,
     iconSize = 24,
+    fallbackRoute,
 }: BackButtonProps) => {
     const router = useRouter();
+
+    const handlePress = () => {
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+
+      if (fallbackRoute) {
+        router.replace(fallbackRoute);
+      }
+    };
+
   return (
-    <TouchableOpacity onPress={() => router.back()} style={[styles.button, style]}>
+    <TouchableOpacity onPress={handlePress} style={[styles.button, style]}>
       <CaretLeftIcon
         size={verticalScale(iconSize)} 
         color={colors.surface}

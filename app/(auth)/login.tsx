@@ -15,6 +15,7 @@ import { verticalScale } from "@/utils/styling";
 import Input from "@/components/Input";
 import * as Icon from "phosphor-react-native";
 import Button from "@/components/Button";
+import BackButton from "@/components/BackButton";
 import { useRouter } from "expo-router";
 import Toast from "@/components/Alert";
 import { useAuth } from "@/context/authContext";
@@ -67,6 +68,10 @@ const Login = () => {
         style={{ flex: 1 }}
       >
         <View style={styles.container}>
+          <BackButton
+            style={styles.backButton}
+            fallbackRoute="/(auth)/welcome"
+          />
 
           {/* Progress Bars */}
           <View style={styles.progressContainer}>
@@ -198,6 +203,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: "space-between",
+  },
+  backButton: {
+    marginBottom: spacingY._15,
+    marginLeft: spacingX._20,
   },
 
   /* Progress Bars */
