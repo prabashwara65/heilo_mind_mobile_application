@@ -62,6 +62,7 @@ export type HeaderProps = {
 export type BackButtonProps = {
     style? : ViewStyle;
     iconSize? : number;
+    fallbackRoute?: Href;
 }
 
 export interface CustomButtonProps extends TouchableOpacityProps {

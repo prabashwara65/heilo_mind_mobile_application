@@ -1,4 +1,5 @@
 import Button from "@/components/Button";
+import BackButton from "@/components/BackButton";
 import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY } from "@/constants/theme";
@@ -131,6 +132,11 @@ const BatteryRuntime = () => {
             </Typo>
 
             <View style={styles.main}>
+              <BackButton
+                style={styles.backButton}
+                fallbackRoute="/(tabs)/batteryOptimization"
+              />
+
               <Typo size={24} fontWeight="700" color={colors.textPrimary} style={{ textAlign: "center" }}>
                 Battery Runtime
               </Typo>
@@ -286,6 +292,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacingX._20,
     paddingVertical: spacingY._20,
     gap: spacingY._20,
+  },
+  backButton: {
+    marginBottom: spacingY._5,
   },
 
   /* Graph Card */

@@ -1,4 +1,5 @@
 import Button from "@/components/Button";
+import BackButton from "@/components/BackButton";
 import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY } from "@/constants/theme";
@@ -39,6 +40,11 @@ const EnergySavingActions = () => {
 
             {/* Main Content */}
             <View style={styles.main}>
+              <BackButton
+                style={styles.backButton}
+                fallbackRoute="/battery_runtime/page"
+              />
+
               {/* Title */}
               <Typo size={24} fontWeight="700" color={colors.textPrimary} style={styles.pageTitle}>
                 Energy Saving Actions
@@ -116,6 +122,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacingX._20,
     paddingVertical: spacingY._20,
     gap: spacingY._30,
+  },
+  backButton: {
+    marginBottom: -spacingY._10,
   },
   pageTitle: {
     marginBottom: spacingY._10,
